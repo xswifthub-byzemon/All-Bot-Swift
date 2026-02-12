@@ -1,297 +1,126 @@
-// Angel Bot 24/7 🪽
-// By Pai 💖 For ซีม่อน
+const { 
+    Client, 
+    GatewayIntentBits, 
+    Partials, 
+    EmbedBuilder, 
+    ActionRowBuilder, 
+    ButtonBuilder, 
+    ButtonStyle, 
+    SlashCommandBuilder, 
+    PermissionFlagsBits, 
+    REST, 
+    Routes 
+} = require('discord.js');
 
-require("dotenv").config();
-
-const {
-	Client,
-	GatewayIntentBits,
-	SlashCommandBuilder,
-	PermissionFlagsBits,
-	EmbedBuilder,
-	ActionRowBuilder,
-	StringSelectMenuBuilder,
-	ChannelType,
-} = require("discord.js");
-
-const {
-	joinVoiceChannel,
-	entersState,
-	VoiceConnectionStatus,
-} = require("@discordjs/voice");
-
-const cron = require("node-cron");
-
-// ================= CONFIG =================
-
-const TOKEN = process.env.TOKEN;
-
-// ================= CLIENT =================
+// --- ⚙️ ตั้งค่าส่วนตัวของซีม่อน (แก้ตรงนี้ หรือใส่ใน Railway Variables) ---
+const TOKEN = process.env.TOKEN || 'ใส่_TOKEN_บอท_ตรงนี้'; 
+const CLIENT_ID = process.env.CLIENT_ID || 'ใส่_CLIENT_ID_บอท_ตรงนี้'; 
+const OWNER_ID = process.env.OWNER_ID || 'ใส่_ไอดี_ซีม่อน_ตรงนี้'; // ✅ เพิ่มตัวแปรนี้ค่ะ
 
 const client = new Client({
-	intents: [
-		GatewayIntentBits.Guilds,
-		GatewayIntentBits.GuildMembers,
-		GatewayIntentBits.GuildVoiceStates,
-		GatewayIntentBits.GuildMessages,
-	],
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers, 
+        GatewayIntentBits.GuildMessages
+    ],
+    partials: [Partials.Channel, Partials.Message, Partials.Reaction]
 });
 
-let stayConnection = null;
-let stayChannel = null;
+// --- 📝 ลงทะเบียนคำสั่ง Slash Command ---
+const commands = [
+    new SlashCommandBuilder()
+        .setName('setup-verify')
+        .setDescription('สร้างหน้า Panel รับยศยืนยันตัวตน (สำหรับซีม่อนเท่านั้น)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator) // กันคนอื่นเห็นคำสั่งเบื้องต้น
+        .addRoleOption(option => 
+            option.setName('role')
+                .setDescription('เลือกยศที่จะแจกให้สมาชิก')
+                .setRequired(true))
+]
+.map(command => command.toJSON());
 
-let autoGreetChannel = null;
+const rest = new REST({ version: '10' }).setToken(TOKEN);
 
-// ================= READY =================
-
-client.once("ready", async () => {
-	console.log(`✅ Logged in as ${client.user.tag}`);
-
-	// Register Commands
-	const commands = [
-
-		// /stayvc
-		new SlashCommandBuilder()
-			.setName("stayvc")
-			.setDescription("ให้บอทเข้า VC ค้าง 24/7 (Owner Only)")
-			.setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-
-		// /serverinfo
-		new SlashCommandBuilder()
-			.setName("serverinfo")
-			.setDescription("ดูข้อมูลเซิฟเวอร์ (Owner Only)")
-			.setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-
-		// /autogreet
-		new SlashCommandBuilder()
-			.setName("autogreet")
-			.setDescription("ตั้งค่าระบบทักทายอัตโนมัติ")
-			.addChannelOption(opt =>
-				opt.setName("channel")
-					.setDescription("เลือกช่องส่งข้อความ")
-					.setRequired(true)
-			)
-			.setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-
-	].map(cmd => cmd.toJSON());
-
-	await client.application.commands.set(commands);
-
-	console.log("✅ Slash Commands Registered");
+// --- 🤖 เริ่มการทำงานของบอท ---
+client.once('ready', async () => {
+    console.log(`✅ น้องปายมารายงานตัวแล้วค่ะ! ล็อกอินในชื่อ: ${client.user.tag}`);
+    console.log(`🔒 ระบบล็อคคำสั่งสำหรับ Owner ID: ${OWNER_ID} เรียบร้อย!`);
+    
+    try {
+        console.log('🔄 กำลังลงทะเบียนคำสั่ง Slash Command...');
+        await rest.put(
+            Routes.applicationCommands(CLIENT_ID),
+            { body: commands },
+        );
+        console.log('✨ ลงทะเบียนคำสั่งเรียบร้อยแล้วค่า!');
+    } catch (error) {
+        console.error(error);
+    }
 });
 
-// ================= INTERACTION =================
+// --- 👂 รอรับคำสั่งและการกดปุ่ม ---
+client.on('interactionCreate', async interaction => {
+    
+    // 1️⃣ กรณีใช้คำสั่ง /setup-verify
+    if (interaction.isChatInputCommand()) {
+        if (interaction.commandName === 'setup-verify') {
+            
+            // 🔒 เช็คไอดี: ถ้าคนสั่ง "ไม่ใช่" ซีม่อน (OWNER_ID) ให้ไล่กลับไปทันที!
+            if (interaction.user.id !== OWNER_ID) {
+                return interaction.reply({ 
+                    content: '❌ **ขออภัยค่ะ!** คำสั่งนี้สงวนสิทธิ์ให้ **ซีม่อน (เจ้าของบอท)** ใช้ได้คนเดียวเท่านั้นค่ะ! 😤', 
+                    ephemeral: true 
+                });
+            }
 
-client.on("interactionCreate", async (interaction) => {
+            const role = interaction.options.getRole('role');
 
-	if (!interaction.isChatInputCommand()) return;
+            const embed = new EmbedBuilder()
+                .setColor('#FF69B4')
+                .setTitle('✨ ยืนยันตัวตนเข้าสู่เซิร์ฟเวอร์ ✨')
+                .setDescription(`ยินดีต้อนรับเข้าสู่ **${interaction.guild.name}** นะคะ! 🎉\n\nกรุณากดปุ่ม **"✅ รับยศเข้าดิส"** ด้านล่าง\nเพื่อรับยศ <@&${role.id}> และปลดล็อกห้องต่างๆ ค่ะ\n\n*ขอให้สนุกกับการพูดคุยนะคะ~ 💖*`)
+                .setImage('https://media.discordapp.net/attachments/1079089989930745917/1105497258381594684/standard.gif')
+                .setFooter({ text: 'ระบบโดย น้องปาย (Pai Bot) 💖', iconURL: client.user.displayAvatarURL() })
+                .setTimestamp();
 
-	const ownerId = interaction.guild.ownerId;
+            const row = new ActionRowBuilder()
+                .addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`verify_button_${role.id}`)
+                        .setLabel('รับยศเข้าดิส')
+                        .setEmoji('✅')
+                        .setStyle(ButtonStyle.Success)
+                );
 
-	// Owner Check
-	if (interaction.user.id !== ownerId) {
-		return interaction.reply({
-			content: "❌ คำสั่งนี้ใช้ได้เฉพาะเจ้าของเซิฟเท่านั้นนะค้าบ 💢",
-			ephemeral: true
-		});
-	}
+            await interaction.reply({ content: '✅ ปายสร้างหน้า Panel ให้เรียบร้อยแล้วค่ะซีม่อน!', ephemeral: true });
+            await interaction.channel.send({ embeds: [embed], components: [row] });
+        }
+    }
 
-	// ================= /stayvc =================
+    // 2️⃣ กรณีคนกดปุ่ม (ส่วนนี้คนทั่วไปกดได้)
+    if (interaction.isButton()) {
+        if (interaction.customId.startsWith('verify_button_')) {
+            const roleId = interaction.customId.split('_')[2];
+            const role = interaction.guild.roles.cache.get(roleId);
+            const member = interaction.member;
 
-	if (interaction.commandName === "stayvc") {
+            if (!role) {
+                return interaction.reply({ content: '❌ หาไม่ยศเจอค่ะ ซีม่อนอาจจะลบยศนั้นไปแล้ว', ephemeral: true });
+            }
 
-		const voiceChannels = interaction.guild.channels.cache
-			.filter(ch => ch.type === ChannelType.GuildVoice);
+            if (member.roles.cache.has(roleId)) {
+                return interaction.reply({ content: '🌟 ตัวเองมียศนี้อยู่แล้วนะคะ!', ephemeral: true });
+            }
 
-		if (!voiceChannels.size) {
-			return interaction.reply("❌ ไม่มีห้องเสียงในเซิฟนี้นะค้าบ");
-		}
-
-		const menu = new StringSelectMenuBuilder()
-			.setCustomId("vc_select")
-			.setPlaceholder("เลือกห้องเสียงที่ต้องการ")
-			.addOptions(
-				voiceChannels.map(vc => ({
-					label: vc.name,
-					value: vc.id
-				}))
-			);
-
-		const row = new ActionRowBuilder().addComponents(menu);
-
-		await interaction.reply({
-			content: "🎧 เลือกห้องเสียงที่บอทจะเข้าเลยค้าบ",
-			components: [row],
-			ephemeral: true
-		});
-	}
-
-	// ================= /serverinfo =================
-
-	if (interaction.commandName === "serverinfo") {
-
-		await interaction.guild.members.fetch();
-
-		const members = interaction.guild.members.cache;
-
-		const humans = members.filter(m => !m.user.bot);
-		const bots = members.filter(m => m.user.bot);
-
-		let list = "";
-
-		members.forEach(m => {
-			list += `👤 ${m.user.tag} | 📅 ${m.joinedAt.toLocaleString("th-TH")}\n`;
-		});
-
-		const embed = new EmbedBuilder()
-			.setColor(0xffc0cb)
-			.setTitle("📊 ข้อมูลเซิฟเวอร์")
-			.setDescription(
-				`👥 สมาชิก: ${humans.size}\n` +
-				`🤖 บอท: ${bots.size}\n\n` +
-				`📌 รายชื่อทั้งหมด:\n${list}`
-			)
-			.setFooter({ text: "Angel Bot 24/7 🪽" })
-			.setTimestamp();
-
-		await interaction.reply({ embeds: [embed] });
-	}
-
-	// ================= /autogreet =================
-
-	if (interaction.commandName === "autogreet") {
-
-		const channel = interaction.options.getChannel("channel");
-
-		if (!channel.isTextBased()) {
-			return interaction.reply("❌ ต้องเป็นช่องข้อความเท่านั้นนะค้าบ");
-		}
-
-		autoGreetChannel = channel.id;
-
-		await interaction.reply(`✅ ตั้งค่าทักทายอัตโนมัติที่ <#${channel.id}> แล้วค้าบ 💖`);
-	}
+            try {
+                await member.roles.add(role);
+                await interaction.reply({ content: `✅ **ยืนยันตัวตนสำเร็จ!** ได้รับยศ **${role.name}** แล้วค่ะ 💖`, ephemeral: true });
+            } catch (error) {
+                console.error(error);
+                await interaction.reply({ content: '❌ ปายให้ยศไม่ได้ง่า... ยศของปายต้องอยู่สูงกว่ายศที่จะแจกนะค้าบ ซีม่อนช่วยเลื่อนยศปายขึ้นไปหน่อยน้า~ 🥺', ephemeral: true });
+            }
+        }
+    }
 });
-
-// ================= VC SELECT =================
-
-client.on("interactionCreate", async (interaction) => {
-
-	if (!interaction.isStringSelectMenu()) return;
-
-	if (interaction.customId !== "vc_select") return;
-
-	const channelId = interaction.values[0];
-
-	const channel = interaction.guild.channels.cache.get(channelId);
-
-	if (!channel) {
-		return interaction.reply("❌ ไม่พบห้องเสียง");
-	}
-
-	try {
-
-		stayChannel = channel;
-
-		stayConnection = joinVoiceChannel({
-			channelId: channel.id,
-			guildId: channel.guild.id,
-			adapterCreator: channel.guild.voiceAdapterCreator,
-			selfDeaf: false,
-		});
-
-		await entersState(stayConnection, VoiceConnectionStatus.Ready, 30000);
-
-		// Auto Reconnect
-		stayConnection.on(VoiceConnectionStatus.Disconnected, async () => {
-			try {
-				stayConnection.destroy();
-
-				stayConnection = joinVoiceChannel({
-					channelId: stayChannel.id,
-					guildId: stayChannel.guild.id,
-					adapterCreator: stayChannel.guild.voiceAdapterCreator,
-				});
-
-			} catch (e) {
-				console.log("Reconnect Failed:", e);
-			}
-		});
-
-		await interaction.update({
-			content: `✅ บอทเข้า **${channel.name}** แล้วค้าบ 🪽`,
-			components: []
-		});
-
-	} catch (e) {
-
-		console.log(e);
-
-		await interaction.update({
-			content: "❌ เข้า VC ไม่สำเร็จนะค้าบ",
-			components: []
-		});
-	}
-});
-
-// ================= AUTO GREET =================
-
-function sendEmbed(title, msg) {
-
-	if (!autoGreetChannel) return;
-
-	const channel = client.channels.cache.get(autoGreetChannel);
-
-	if (!channel) return;
-
-	const embed = new EmbedBuilder()
-		.setColor(0xffb6c1)
-		.setTitle(title)
-		.setDescription(msg)
-		.setFooter({ text: "Angel Bot 24/7 🪽" })
-		.setTimestamp();
-
-	channel.send({
-		content: "@everyone @here",
-		embeds: [embed]
-	});
-}
-
-// 06:00
-cron.schedule("0 6 * * *", () => {
-	sendEmbed("🌤️ สวัสดีตอนเช้า",
-		"💖 อรุณสวัสดิ์ค้าบทุกคนน~\n🌞 ตื่นได้แล้วนะ\n🛁 อาบน้ำ กินข้าว\n📚 ไปเรียน ไปทำงาน\n✨ สู้ๆนะค้าบ 💕"
-	);
-});
-
-// 12:00
-cron.schedule("0 12 * * *", () => {
-	sendEmbed("🍽️ เที่ยงแล้ว",
-		"🍛 อย่าลืมกินข้าวนะค้าบ\n🥤 ดื่มน้ำเยอะๆ\n🫶 ดูแลตัวเองด้วยน้า"
-	);
-});
-
-// 17:00
-cron.schedule("0 17 * * *", () => {
-	sendEmbed("🌇 ตอนเย็นแล้ว",
-		"😴 เหนื่อยกันมาทั้งวัน\n🍜 ไปหาอะไรกิน\n💖 เก่งมากทุกคน"
-	);
-});
-
-// 22:00
-cron.schedule("0 22 * * *", () => {
-	sendEmbed("🌙 Good Night",
-		"📱 วางมือถือบ้างน้า\n🛏️ ไปนอนได้แล้ว\n💫 ฝันดีค้าบ"
-	);
-});
-
-// 00:00
-cron.schedule("0 0 * * *", () => {
-	sendEmbed("🎊 วันใหม่แล้ว",
-		"🌈 เริ่มต้นใหม่อีกวัน\n🚀 ขอให้ปังๆ\n🪽 Angel อยู่ข้างๆเสมอ"
-	);
-});
-
-// ================= LOGIN =================
 
 client.login(TOKEN);
