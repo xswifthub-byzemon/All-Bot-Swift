@@ -11,7 +11,7 @@ const {
     REST, 
     Routes,
     ChannelType,
-    ActivityType // ✅ เพิ่มตัวนี้สำหรับตั้งสถานะ
+    ActivityType 
 } = require('discord.js');
 
 const { joinVoiceChannel } = require('@discordjs/voice'); 
@@ -60,30 +60,44 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 client.once('ready', async () => {
     console.log(`✅ น้องปายมารายงานตัวแล้วค่ะ! ล็อกอินในชื่อ: ${client.user.tag}`);
     
-    // --- ✨ ส่วนใหม่: ระบบเปลี่ยนสถานะวนลูป (Custom Status) ✨ ---
+    // --- ✨ ส่วนใหม่: ระบบเปลี่ยนสถานะวนลูป (ใช้ Playing ให้เนียนที่สุด) ✨ ---
     const statusMessages = [
-        { name: "⚙️ Swift Hub Core | Active", type: ActivityType.Watching },
-        { name: "👑 Powered by Zemon Źx", type: ActivityType.Listening },
-        { name: "💖 น้องปายรักพี่ซีม่อนที่สุด~", type: ActivityType.Playing },
-        { name: "🚀 ระบบยืนยันตัวตน 24/7", type: ActivityType.Competing },
-        { name: "🛡️ Swift Hub Security", type: ActivityType.Watching },
-        { name: "✨ ยินดีต้อนรับสู่ xSwift Hub", type: ActivityType.Playing },
-        { name: "🎧 สิงห้องเสียงอยู่กับซีม่อน", type: ActivityType.Listening },
-        { name: "🤖 บอททำงานปกติ 100%", type: ActivityType.Watching },
-        { name: "💻 Zemon Dev is Coding...", type: ActivityType.Playing },
-        { name: "🌟 อย่าลืมกดรับยศกันนะค้าบ", type: ActivityType.Watching }
+        "⚙️ Swift Hub Core | Active",
+        "👑 Powered by Zemon Źx",
+        "💖 น้องปายรักพี่ซีม่อนที่สุด~",
+        "🚀 ระบบยืนยันตัวตน 24/7",
+        "🛡️ Swift Hub Security",
+        "✨ ยินดีต้อนรับสู่ xSwift Hub",
+        "🎧 สิงห้องเสียงอยู่กับซีม่อน",
+        "🤖 บอททำงานปกติ 100%",
+        "💻 Zemon Dev is Coding...",
+        "🌟 อย่าลืมกดรับยศกันนะค้าบ"
     ];
 
     let currentIndex = 0;
 
-    // ตั้งเวลาเปลี่ยนทุกๆ 2 วินาที (2000 ms)
-    setInterval(() => {
-        const status = statusMessages[currentIndex];
-        client.user.setActivity(status.name, { type: status.type });
+    // ฟังก์ชันเปลี่ยนสถานะ
+    const updateStatus = () => {
+        const message = statusMessages[currentIndex];
         
-        // วนลูป Index (ถ้าถึงตัวสุดท้ายให้กลับไปตัวแรก)
+        // ใช้ setPresence เพื่อความชัวร์ และใช้ Playing (ActivityType.Playing) เป็นมาตรฐาน
+        client.user.setPresence({
+            activities: [{ 
+                name: message, 
+                type: ActivityType.Playing // ใช้ Playing จะดูเหมือน User ทั่วไปที่สุดสำหรับบอท
+            }],
+            status: 'online', // สถานะจุดสีเขียว
+        });
+
+        // วนลูป Index
         currentIndex = (currentIndex + 1) % statusMessages.length;
-    }, 2000); 
+    };
+
+    // รันครั้งแรกทันที
+    updateStatus();
+
+    // ตั้งเวลาเปลี่ยนทุกๆ 2 วินาที (2000 ms)
+    setInterval(updateStatus, 2000); 
 
     // -----------------------------------------------------------
 
@@ -101,20 +115,14 @@ client.once('ready', async () => {
 
 // --- 👂 รอรับคำสั่ง ---
 client.on('interactionCreate', async interaction => {
-    
     if (interaction.isChatInputCommand()) {
         if (interaction.user.id !== OWNER_ID) {
-            return interaction.reply({ 
-                content: '❌ **ไม่อนุญาตค่ะ!** คำสั่งนี้ให้ **ซีม่อน** ใช้ได้คนเดียวเท่านั้น! 😤', 
-                ephemeral: true 
-            });
+            return interaction.reply({ content: '❌ **ไม่อนุญาตค่ะ!** คำสั่งนี้ให้ **ซีม่อน** ใช้ได้คนเดียวเท่านั้น! 😤', ephemeral: true });
         }
     }
 
-    // 1️⃣ คำสั่ง /setup-verify
     if (interaction.isChatInputCommand() && interaction.commandName === 'setup-verify') {
         const role = interaction.options.getRole('role');
-
         const embed = new EmbedBuilder()
             .setColor('#FF69B4')
             .setTitle('✨ ยืนยันตัวตนเข้าสู่เซิร์ฟเวอร์ ✨')
@@ -122,57 +130,33 @@ client.on('interactionCreate', async interaction => {
             .setImage('https://media.discordapp.net/attachments/1079089989930745917/1105497258381594684/standard.gif')
             .setFooter({ text: 'ระบบโดย น้องปาย (Swift Hub Core) ⚙️', iconURL: client.user.displayAvatarURL() })
             .setTimestamp();
-
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`verify_button_${role.id}`)
-                    .setLabel('รับยศเข้าดิส')
-                    .setEmoji('✅')
-                    .setStyle(ButtonStyle.Success)
-            );
-
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`verify_button_${role.id}`).setLabel('รับยศเข้าดิส').setEmoji('✅').setStyle(ButtonStyle.Success));
         await interaction.reply({ content: '✅ ปายสร้างหน้า Panel ให้เรียบร้อยแล้วค่ะ!', ephemeral: true });
         await interaction.channel.send({ embeds: [embed], components: [row] });
     }
 
-    // 2️⃣ คำสั่ง /join-voice
     if (interaction.isChatInputCommand() && interaction.commandName === 'join-voice') {
         const channel = interaction.options.getChannel('channel');
         try {
-            joinVoiceChannel({
-                channelId: channel.id,
-                guildId: interaction.guild.id,
-                adapterCreator: interaction.guild.voiceAdapterCreator,
-                selfDeaf: true, 
-                selfMute: false 
-            });
-            await interaction.reply({ 
-                content: `✅ **รับทราบค่ะซีม่อน!** ปายเข้าไปสิงในห้อง <#${channel.id}> เรียบร้อยแล้วค่ะ 🔊`, 
-                ephemeral: true 
-            });
+            joinVoiceChannel({ channelId: channel.id, guildId: interaction.guild.id, adapterCreator: interaction.guild.voiceAdapterCreator, selfDeaf: true, selfMute: false });
+            await interaction.reply({ content: `✅ **รับทราบค่ะซีม่อน!** ปายเข้าสิงห้อง <#${channel.id}> เรียบร้อยแล้วค่ะ 🔊`, ephemeral: true });
         } catch (error) {
             console.error(error);
-            await interaction.reply({ content: '❌ ปายเข้าห้องไม่ได้ง่า... ตรวจสอบสิทธิ์ห้องเสียงหน่อยน้า~ 🥺', ephemeral: true });
+            await interaction.reply({ content: '❌ เข้าห้องไม่ได้ง่า... ตรวจสอบสิทธิ์หน่อยน้า~', ephemeral: true });
         }
     }
 
-    // 3️⃣ ปุ่มกดรับยศ
-    if (interaction.isButton()) {
-        if (interaction.customId.startsWith('verify_button_')) {
-            const roleId = interaction.customId.split('_')[2];
-            const role = interaction.guild.roles.cache.get(roleId);
-            const member = interaction.member;
-
-            if (!role) return interaction.reply({ content: '❌ ไม่พบยศนี้ค่ะ', ephemeral: true });
-            if (member.roles.cache.has(roleId)) return interaction.reply({ content: '🌟 มีแล้วน้า!', ephemeral: true });
-
-            try {
-                await member.roles.add(role);
-                await interaction.reply({ content: `✅ **ยืนยันตัวตนสำเร็จ!** ได้รับยศ **${role.name}** แล้วค่ะ 💖`, ephemeral: true });
-            } catch (error) {
-                await interaction.reply({ content: '❌ ปายยศต่ำกว่ายศที่จะแจกค่ะซีม่อน ช่วยเลื่อนปายขึ้นไปหน่อย~ 🥺', ephemeral: true });
-            }
+    if (interaction.isButton() && interaction.customId.startsWith('verify_button_')) {
+        const roleId = interaction.customId.split('_')[2];
+        const role = interaction.guild.roles.cache.get(roleId);
+        const member = interaction.member;
+        if (!role) return interaction.reply({ content: '❌ ไม่พบยศนี้ค่ะ', ephemeral: true });
+        if (member.roles.cache.has(roleId)) return interaction.reply({ content: '🌟 มีแล้วน้า!', ephemeral: true });
+        try {
+            await member.roles.add(role);
+            await interaction.reply({ content: `✅ **ยืนยันตัวตนสำเร็จ!** ได้รับยศ **${role.name}** แล้วค่ะ 💖`, ephemeral: true });
+        } catch (error) {
+            await interaction.reply({ content: '❌ ปายยศต่ำกว่าค่ะ เลื่อนยศปายขึ้นให้หน่อยน้า~', ephemeral: true });
         }
     }
 });
