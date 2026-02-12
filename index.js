@@ -10,10 +10,11 @@ const {
     PermissionFlagsBits, 
     REST, 
     Routes,
-    ChannelType // ✅ เพิ่มตัวนี้มาเพื่อเช็คห้องเสียง
+    ChannelType,
+    ActivityType // ✅ เพิ่มตัวนี้สำหรับตั้งสถานะ
 } = require('discord.js');
 
-const { joinVoiceChannel } = require('@discordjs/voice'); // ✅ เรียกใช้ระบบเสียง
+const { joinVoiceChannel } = require('@discordjs/voice'); 
 
 // --- ⚙️ ตั้งค่าส่วนตัวของซีม่อน ---
 const TOKEN = process.env.TOKEN || 'ใส่_TOKEN_บอท_ตรงนี้'; 
@@ -25,14 +26,13 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers, 
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.GuildVoiceStates // ✅ สำคัญ! ต้องเปิดการรับรู้เรื่องเสียง
+        GatewayIntentBits.GuildVoiceStates 
     ],
     partials: [Partials.Channel, Partials.Message, Partials.Reaction]
 });
 
-// --- 📝 ลงทะเบียนคำสั่ง Slash Command (รวม 2 คำสั่ง) ---
+// --- 📝 ลงทะเบียนคำสั่ง Slash Command ---
 const commands = [
-    // 1. คำสั่งสร้างปุ่มรับยศ
     new SlashCommandBuilder()
         .setName('setup-verify')
         .setDescription('สร้างหน้า Panel รับยศยืนยันตัวตน (สำหรับซีม่อนเท่านั้น)')
@@ -42,15 +42,14 @@ const commands = [
                 .setDescription('เลือกยศที่จะแจกให้สมาชิก')
                 .setRequired(true)),
     
-    // 2. คำสั่งให้บอทเข้าห้องเสียง (ใหม่! ✨)
     new SlashCommandBuilder()
-        .setName('join-voice') // ชื่อคำสั่งที่ปายตั้งให้
+        .setName('join-voice') 
         .setDescription('สั่งให้ปายเข้าสิงห้องเสียง 24/7 (สำหรับซีม่อนเท่านั้น)')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addChannelOption(option => 
             option.setName('channel')
                 .setDescription('เลือกห้องเสียงที่จะให้ปายเข้า')
-                .addChannelTypes(ChannelType.GuildVoice) // บังคับเลือกได้แค่ห้องเสียง
+                .addChannelTypes(ChannelType.GuildVoice) 
                 .setRequired(true))
 ]
 .map(command => command.toJSON());
@@ -61,6 +60,33 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 client.once('ready', async () => {
     console.log(`✅ น้องปายมารายงานตัวแล้วค่ะ! ล็อกอินในชื่อ: ${client.user.tag}`);
     
+    // --- ✨ ส่วนใหม่: ระบบเปลี่ยนสถานะวนลูป (Custom Status) ✨ ---
+    const statusMessages = [
+        { name: "⚙️ Swift Hub Core | Active", type: ActivityType.Watching },
+        { name: "👑 Powered by Zemon Źx", type: ActivityType.Listening },
+        { name: "💖 น้องปายรักพี่ซีม่อนที่สุด~", type: ActivityType.Playing },
+        { name: "🚀 ระบบยืนยันตัวตน 24/7", type: ActivityType.Competing },
+        { name: "🛡️ Swift Hub Security", type: ActivityType.Watching },
+        { name: "✨ ยินดีต้อนรับสู่ xSwift Hub", type: ActivityType.Playing },
+        { name: "🎧 สิงห้องเสียงอยู่กับซีม่อน", type: ActivityType.Listening },
+        { name: "🤖 บอททำงานปกติ 100%", type: ActivityType.Watching },
+        { name: "💻 Zemon Dev is Coding...", type: ActivityType.Playing },
+        { name: "🌟 อย่าลืมกดรับยศกันนะค้าบ", type: ActivityType.Watching }
+    ];
+
+    let currentIndex = 0;
+
+    // ตั้งเวลาเปลี่ยนทุกๆ 2 วินาที (2000 ms)
+    setInterval(() => {
+        const status = statusMessages[currentIndex];
+        client.user.setActivity(status.name, { type: status.type });
+        
+        // วนลูป Index (ถ้าถึงตัวสุดท้ายให้กลับไปตัวแรก)
+        currentIndex = (currentIndex + 1) % statusMessages.length;
+    }, 2000); 
+
+    // -----------------------------------------------------------
+
     try {
         console.log('🔄 กำลังลงทะเบียนคำสั่ง Slash Command...');
         await rest.put(
@@ -76,7 +102,6 @@ client.once('ready', async () => {
 // --- 👂 รอรับคำสั่ง ---
 client.on('interactionCreate', async interaction => {
     
-    // 🔒 เช็คว่าเป็นซีม่อนไหม (ใช้ได้กับทุกคำสั่งที่เป็น Slash Command)
     if (interaction.isChatInputCommand()) {
         if (interaction.user.id !== OWNER_ID) {
             return interaction.reply({ 
@@ -86,7 +111,7 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // 1️⃣ คำสั่ง /setup-verify (ระบบรับยศ)
+    // 1️⃣ คำสั่ง /setup-verify
     if (interaction.isChatInputCommand() && interaction.commandName === 'setup-verify') {
         const role = interaction.options.getRole('role');
 
@@ -111,32 +136,28 @@ client.on('interactionCreate', async interaction => {
         await interaction.channel.send({ embeds: [embed], components: [row] });
     }
 
-    // 2️⃣ คำสั่ง /join-voice (ระบบเข้าห้องเสียง)
+    // 2️⃣ คำสั่ง /join-voice
     if (interaction.isChatInputCommand() && interaction.commandName === 'join-voice') {
         const channel = interaction.options.getChannel('channel');
-
         try {
-            // สั่งให้เชื่อมต่อ
             joinVoiceChannel({
                 channelId: channel.id,
                 guildId: interaction.guild.id,
                 adapterCreator: interaction.guild.voiceAdapterCreator,
-                selfDeaf: true, // ปิดหูตัวเอง (ประหยัดเน็ต)
-                selfMute: false // ไม่ปิดไมค์ (เผื่ออนาคตซีม่อนอยากให้พูด)
+                selfDeaf: true, 
+                selfMute: false 
             });
-
             await interaction.reply({ 
-                content: `✅ **รับทราบค่ะซีม่อน!** ปายเข้าไปสิงในห้อง <#${channel.id}> เรียบร้อยแล้วค่ะ 🔊\n*ปายจะอยู่เฝ้าห้องนี้ยาวๆ จนกว่าโลกจะแตกเลยค่า~*`, 
+                content: `✅ **รับทราบค่ะซีม่อน!** ปายเข้าไปสิงในห้อง <#${channel.id}> เรียบร้อยแล้วค่ะ 🔊`, 
                 ephemeral: true 
             });
-
         } catch (error) {
             console.error(error);
-            await interaction.reply({ content: '❌ ปายเข้าห้องไม่ได้ง่า... ตรวจสอบสิทธิ์ห้องเสียงของปายหน่อยน้า~ 🥺', ephemeral: true });
+            await interaction.reply({ content: '❌ ปายเข้าห้องไม่ได้ง่า... ตรวจสอบสิทธิ์ห้องเสียงหน่อยน้า~ 🥺', ephemeral: true });
         }
     }
 
-    // 3️⃣ ระบบกดปุ่มรับยศ (เหมือนเดิม)
+    // 3️⃣ ปุ่มกดรับยศ
     if (interaction.isButton()) {
         if (interaction.customId.startsWith('verify_button_')) {
             const roleId = interaction.customId.split('_')[2];
