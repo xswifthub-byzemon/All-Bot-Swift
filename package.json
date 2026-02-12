@@ -1,17 +1,13 @@
 {
   "name": "zemon-swift-hub-bot",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Bot for Zemon by Pai",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.15.0",
-    "@discordjs/voice": "^0.17.0",
-    "sodium-native": "^4.0.4",
-    "libsodium-wrappers": "^0.7.15",
-    "opusscript": "^0.0.8"
+    "discord.js": "^14.15.0"
   },
   "engines": {
     "node": "18.x"
