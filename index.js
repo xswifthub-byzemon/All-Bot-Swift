@@ -27,7 +27,7 @@ const TOKEN = process.env.TOKEN || 'ใส่_TOKEN_บอท_ตรงนี้
 const CLIENT_ID = process.env.CLIENT_ID || 'ใส่_CLIENT_ID_บอท_ตรงนี้'; 
 const OWNER_ID = process.env.OWNER_ID || 'ใส่_ไอดี_ซีม่อน_ตรงนี้'; 
 
-// เก็บข้อมูล
+// เก็บข้อมูล (Memory)
 const activeGiveaways = new Map();
 const giveawaySetup = new Map(); 
 const db = { users: {}, config: { antiLink: [] } };
@@ -195,17 +195,16 @@ client.on('interactionCreate', async interaction => {
              return interaction.reply({ content: '❌ เฉพาะซีม่อนเท่านั้นค่ะ', ephemeral: true });
         }
 
-        // 1. เลือกประเภทรางวัล -> เด้ง Modal ถามรางวัล+เวลา ทันที (ไม่ต้องถามจำนวนคน)
+        // 1. เลือกประเภทรางวัล -> เด้ง Modal ใส่รางวัล+เวลาเลย (ข้ามถามจำนวนคน = 1 เสมอ)
         if (interaction.customId.startsWith('gw_type_')) {
             const type = interaction.customId.replace('gw_type_', '');
-            giveawaySetup.set(interaction.user.id, { prizeType: type, winners: 1 }); // Default winners = 1
+            giveawaySetup.set(interaction.user.id, { prizeType: type, winners: 1 }); // Fixed winners = 1
 
             if (type === 'role') {
-                // ถ้าเป็นยศ ให้เลือกยศก่อน (Select Menu)
                 const row = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('gw_set_role').setPlaceholder('เลือกยศที่จะแจก...'));
                 await interaction.reply({ content: '🛡️ **กรุณาเลือกยศที่จะแจกให้ผู้ชนะค่ะ:**', components: [row], ephemeral: true });
             } else {
-                // ถ้าเป็น Link/Text -> เด้ง Modal ถามรางวัล + เวลา (รวมกันใน 1 Modal เพื่อกัน Error)
+                // Link/Text: ถามรางวัล + เวลา (ใน 1 Modal)
                 const modal = new ModalBuilder().setCustomId('gw_input_prize_time').setTitle('ตั้งค่ารางวัลและเวลา');
                 
                 const prizeInput = new TextInputBuilder()
@@ -248,7 +247,6 @@ client.on('interactionCreate', async interaction => {
         } else if (interaction.customId === 'gw_select_log') {
             setup.logCh = interaction.values[0];
             
-            // --- เริ่มกิจกรรม (Launch) ---
             const targetCh = interaction.guild.channels.cache.get(setup.targetCh);
             const logCh = interaction.guild.channels.cache.get(setup.logCh);
             let prizeText = setup.prizeType === 'role' ? `<@&${setup.prizes[0]}>` : `🎁 1 รางวัล (ลุ้นรางวัลใน DM)`;
@@ -259,7 +257,6 @@ client.on('interactionCreate', async interaction => {
             const gmsg = await targetCh.send({ embeds: [embed], components: [row] });
             await interaction.update({ content: `✅ **กิจกรรมเริ่มแล้ว!**\n📍 ห้องกิจกรรม: <#${targetCh.id}>\n🔔 ห้องแจ้งเตือน: <#${logCh.id}>`, components: [] });
 
-            // Save active giveaway
             activeGiveaways.set(gmsg.id, {
                 messageId: gmsg.id,
                 channelId: targetCh.id,
@@ -331,7 +328,6 @@ client.on('interactionCreate', async interaction => {
             const embed = EmbedBuilder.from(interaction.message.embeds[0]);
             let timeText = gw.startTime ? `สิ้นสุด: <t:${Math.floor((gw.startTime + gw.duration)/1000)}:R>` : `เวลา: ${ms(gw.duration, {long:true})} (เริ่มนับเมื่อมีคนกด)`;
             
-            // Fix display for role prize
             let prizeDisplay = gw.prizeType === 'role' ? `<@&${gw.prizes[0]}>` : '🎁 1 รางวัล (ลุ้นรางวัลใน DM)';
 
             embed.setDescription(`🎁 **รางวัล:** **${prizeDisplay}**\n👥 **ผู้โชคดี:** **1 ท่าน**\n⏳ **${timeText}**\n\n⬇️ **รายชื่อผู้เข้าร่วม (${gw.participants.length}):**\n${listStr.substring(0, 1000)}`);
@@ -382,12 +378,9 @@ client.on('interactionCreate', async interaction => {
         // Verify Check
         if (interaction.customId.startsWith('verify_button_')) {
             const rId = interaction.customId.split('_')[2];
-            
-            // Fix: ตรวจสอบยศให้แม่นยำขึ้น
             if (interaction.member.roles.cache.has(rId)) {
                 return interaction.reply({ content: `⚠️ **ได้รับยศ <@&${rId}> ไปแล้วน้า! อย่ากดเล่นสิคะ 😜**`, ephemeral: true });
             }
-            
             const role = interaction.guild.roles.cache.get(rId);
             if (role) {
                 await interaction.member.roles.add(role)
@@ -398,7 +391,7 @@ client.on('interactionCreate', async interaction => {
             }
         }
 
-        // Ticket & Level (Code เดิม)
+        // Ticket & Level
         if (interaction.customId === 'open_ticket') {
             const cName = `ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
             if (interaction.guild.channels.cache.find(c => c.name === cName)) return interaction.reply({ content: '❌ มีห้องเดิมอยู่แล้วนะคะ', ephemeral: true });
