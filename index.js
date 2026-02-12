@@ -20,7 +20,6 @@ const CLIENT_ID = process.env.CLIENT_ID || 'ใส่_CLIENT_ID_บอท_ตร
 const OWNER_ID = process.env.OWNER_ID || 'ใส่_ไอดี_ซีม่อน_ตรงนี้'; 
 
 // --- 🛡️ ระบบกันบอทตาย (Anti-Crash) ---
-// ใส่ไว้เพื่อไม่ให้บอทดับเวลาเจอ Error 503 หรือเน็ตหลุด
 process.on('unhandledRejection', error => {
     console.error('Unhandled Rejection:', error);
 });
@@ -31,7 +30,7 @@ process.on('uncaughtException', error => {
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers, 
+        GatewayIntentBits.GuildMembers, // ต้องใช้อันนี้เพื่อนับคน/บอท
         GatewayIntentBits.GuildMessages
     ],
     partials: [Partials.Channel, Partials.Message, Partials.Reaction]
@@ -52,7 +51,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('setup-stats')
-        .setDescription('สร้างห้องโชว์จำนวนสมาชิกเรียลไทม์')
+        .setDescription('สร้างหมวดหมู่และห้องโชว์จำนวนสมาชิก (คน/บอท/รวม)')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ]
 .map(command => command.toJSON());
@@ -63,7 +62,7 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 client.once('ready', async () => {
     console.log(`✅ น้องปาย (Swift Hub Core) มารายงานตัวแล้วค่ะ! Logged in as ${client.user.tag}`);
     
-    // Custom Status
+    // 1. Custom Status (วนลูป)
     const statusMessages = [
         "⚙️ Swift Hub Core | Active",
         "👑 Powered by Zemon Źx",
@@ -88,15 +87,30 @@ client.once('ready', async () => {
     };
     setInterval(updateStatus, 3000); 
 
-    // Server Stats Update (Every 10 mins)
-    setInterval(() => {
-        client.guilds.cache.forEach(guild => {
-            const statsChannel = guild.channels.cache.find(c => c.name.startsWith('👥 Members:'));
-            if (statsChannel) {
-                statsChannel.setName(`👥 Members: ${guild.memberCount.toLocaleString()}`).catch(console.error);
+    // 2. Server Stats Update (อัปเดตทุก 10 นาที)
+    setInterval(async () => {
+        client.guilds.cache.forEach(async guild => {
+            try {
+                // ดึงข้อมูลสมาชิกใหม่ทั้งหมดเพื่อให้ตัวเลขเป๊ะ
+                await guild.members.fetch(); 
+                const total = guild.memberCount;
+                const bots = guild.members.cache.filter(m => m.user.bot).size;
+                const humans = total - bots;
+
+                // อัปเดตห้องต่างๆ ตามชื่อที่ตั้งไว้
+                const humanChannel = guild.channels.cache.find(c => c.name.startsWith('Mw 👨・Members:'));
+                const botChannel = guild.channels.cache.find(c => c.name.startsWith('Bot 🤖・Bots:'));
+                const totalChannel = guild.channels.cache.find(c => c.name.startsWith('All 🌎・Total:'));
+
+                if (humanChannel) humanChannel.setName(`Mw 👨・Members: ${humans.toLocaleString()}`).catch(console.error);
+                if (botChannel) botChannel.setName(`Bot 🤖・Bots: ${bots.toLocaleString()}`).catch(console.error);
+                if (totalChannel) totalChannel.setName(`All 🌎・Total: ${total.toLocaleString()}`).catch(console.error);
+
+            } catch (err) {
+                console.error('Error updating stats:', err);
             }
         });
-    }, 600000);
+    }, 600000); // 10 นาที
 
     try {
         console.log('🔄 กำลังลงทะเบียนคำสั่ง Slash Command...');
@@ -110,13 +124,12 @@ client.once('ready', async () => {
 // --- 👂 รอรับคำสั่ง (Interaction) ---
 client.on('interactionCreate', async interaction => {
     
-    // ตรวจสอบว่าเป็นคำสั่ง Slash หรือไม่
     if (interaction.isChatInputCommand()) {
         if (interaction.user.id !== OWNER_ID) {
             return interaction.reply({ content: '❌ **ไม่อนุญาตค่ะ!** คำสั่งนี้ให้ **ซีม่อน** ใช้ได้คนเดียวเท่านั้น! 😤', ephemeral: true });
         }
 
-        // ✅ ใช้ deferReply เพื่อบอก Discord ว่า "รอแป๊บนึงนะ" (แก้ปัญหา Application did not respond)
+        // ✅ Defer Reply ป้องกัน Error "Application did not respond"
         await interaction.deferReply({ ephemeral: true });
 
         try {
@@ -160,17 +173,54 @@ client.on('interactionCreate', async interaction => {
             }
 
             // -----------------------------------------------------
-            // 3️⃣ คำสั่ง /setup-stats
+            // 3️⃣ คำสั่ง /setup-stats (แบบใหม่ 3 ห้อง + หมวดหมู่)
             // -----------------------------------------------------
             if (interaction.commandName === 'setup-stats') {
-                const channel = await interaction.guild.channels.create({
-                    name: `👥 Members: ${interaction.guild.memberCount.toLocaleString()}`,
-                    type: ChannelType.GuildVoice,
+                
+                // ดึงข้อมูลสมาชิกก่อน
+                await interaction.guild.members.fetch();
+                const total = interaction.guild.memberCount;
+                const bots = interaction.guild.members.cache.filter(m => m.user.bot).size;
+                const humans = total - bots;
+
+                // 1. สร้างหมวดหมู่ (Category)
+                const category = await interaction.guild.channels.create({
+                    name: '📊 SERVER STATS',
+                    type: ChannelType.GuildCategory,
                     permissionOverwrites: [
-                        { id: interaction.guild.id, deny: [PermissionFlagsBits.Connect], allow: [PermissionFlagsBits.ViewChannel] }
+                        {
+                            id: interaction.guild.id, // @everyone
+                            deny: [PermissionFlagsBits.Connect], // ห้ามเข้าห้องเสียง
+                            allow: [PermissionFlagsBits.ViewChannel] // แต่มองเห็นได้
+                        }
                     ]
                 });
-                await interaction.editReply({ content: `✅ สร้างห้องสถิติเรียบร้อยแล้วค่ะ! <#${channel.id}>` });
+
+                // 2. สร้างห้อง: คนจริง (Humans)
+                await interaction.guild.channels.create({
+                    name: `Mw 👨・Members: ${humans.toLocaleString()}`,
+                    type: ChannelType.GuildVoice,
+                    parent: category.id,
+                    permissionOverwrites: [{ id: interaction.guild.id, deny: [PermissionFlagsBits.Connect] }]
+                });
+
+                // 3. สร้างห้อง: รวมทั้งหมด (Total)
+                await interaction.guild.channels.create({
+                    name: `All 🌎・Total: ${total.toLocaleString()}`,
+                    type: ChannelType.GuildVoice,
+                    parent: category.id,
+                    permissionOverwrites: [{ id: interaction.guild.id, deny: [PermissionFlagsBits.Connect] }]
+                });
+
+                // 4. สร้างห้อง: บอท (Bots)
+                await interaction.guild.channels.create({
+                    name: `Bot 🤖・Bots: ${bots.toLocaleString()}`,
+                    type: ChannelType.GuildVoice,
+                    parent: category.id,
+                    permissionOverwrites: [{ id: interaction.guild.id, deny: [PermissionFlagsBits.Connect] }]
+                });
+
+                await interaction.editReply({ content: `✅ สร้างหมวดหมู่และห้องสถิติทั้ง 3 ห้องเรียบร้อยแล้วค่ะ! 🎉` });
             }
 
         } catch (error) {
@@ -187,18 +237,18 @@ client.on('interactionCreate', async interaction => {
         
         // A. ปุ่มรับยศ
         if (interaction.customId.startsWith('verify_button_')) {
-            await interaction.deferReply({ ephemeral: true }); // กัน Error 503
+            await interaction.deferReply({ ephemeral: true }); 
             const roleId = interaction.customId.split('_')[2];
             const role = interaction.guild.roles.cache.get(roleId);
             
-            if (!role) return interaction.editReply({ content: '❌ ไม่พบยศนี้ค่ะ (อาจถูกลบไปแล้ว)' });
-            if (interaction.member.roles.cache.has(roleId)) return interaction.editReply({ content: '🌟 ตัวเองมียศนี้อยู่แล้วนะคะ!' });
+            if (!role) return interaction.editReply({ content: '❌ ไม่พบยศนี้ค่ะ' });
+            if (interaction.member.roles.cache.has(roleId)) return interaction.editReply({ content: '🌟 มีแล้วน้า!' });
 
             try {
                 await interaction.member.roles.add(role);
-                await interaction.editReply({ content: `✅ ได้รับยศ **${role.name}** เรียบร้อยค่ะ! 🎉` });
+                await interaction.editReply({ content: `✅ ได้รับยศ **${role.name}** เรียบร้อยค่ะ!` });
             } catch (error) {
-                await interaction.editReply({ content: '❌ ปายให้ยศไม่ได้ค่ะ (ยศของปายต้องอยู่สูงกว่ายศที่จะแจกนะค้าบ)' });
+                await interaction.editReply({ content: '❌ ยศของปายต้องอยู่สูงกว่ายศที่จะแจกนะค้าบ' });
             }
         }
 
@@ -206,13 +256,12 @@ client.on('interactionCreate', async interaction => {
         if (interaction.customId === 'open_ticket') {
             await interaction.deferReply({ ephemeral: true });
             
-            // กันชื่อซ้ำ
             const cleanName = interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 20); 
             const channelName = `ticket-${cleanName}`;
             const existingChannel = interaction.guild.channels.cache.find(c => c.name === channelName);
             
             if (existingChannel) {
-                return interaction.editReply({ content: `❌ ตัวเองเปิดตั๋วค้างไว้อยู่นะคะ! ไปที่นี่เลย 👉 <#${existingChannel.id}>` });
+                return interaction.editReply({ content: `❌ เปิดตั๋วค้างไว้อยู่นะคะ! 👉 <#${existingChannel.id}>` });
             }
 
             try {
@@ -230,7 +279,7 @@ client.on('interactionCreate', async interaction => {
                 const ticketEmbed = new EmbedBuilder()
                     .setColor('#00FF00')
                     .setTitle(`🎫 Ticket: ${interaction.user.tag}`)
-                    .setDescription(`สวัสดีค่ะ <@${interaction.user.id}>! 👋\n\nซีม่อนจะรีบมาตอบกลับให้เร็วที่สุดนะคะ 💖\nแจ้งรายละเอียดไว้ได้เลยค่า\n\n*กดปุ่มสีแดงเพื่อปิดห้องเมื่อเสร็จธุระนะคะ*`)
+                    .setDescription(`สวัสดีค่ะ <@${interaction.user.id}>! 👋\nซีม่อนจะรีบมาตอบกลับให้เร็วที่สุดนะคะ 💖\n\n*กดปุ่มสีแดงเพื่อปิดห้องเมื่อเสร็จธุระนะคะ*`)
                     .setTimestamp();
                 
                 const closeRow = new ActionRowBuilder().addComponents(
@@ -238,11 +287,11 @@ client.on('interactionCreate', async interaction => {
                 );
 
                 await ticketChannel.send({ content: `<@${OWNER_ID}> ลูกค้ามาแล้วค้าบ! 🔔`, embeds: [ticketEmbed], components: [closeRow] });
-                await interaction.editReply({ content: `✅ เปิดห้องตั๋วแล้วค่ะ! ไปที่นี่เลย 👉 <#${ticketChannel.id}>` });
+                await interaction.editReply({ content: `✅ เปิดห้องตั๋วแล้วค่ะ! 👉 <#${ticketChannel.id}>` });
 
             } catch (error) {
                 console.error(error);
-                await interaction.editReply({ content: '❌ สร้างห้องไม่ได้ง่า... บอทอาจจะไม่มีสิทธิ์ Manage Channels หรือยศไม่ถึงค่ะ' });
+                await interaction.editReply({ content: '❌ สร้างห้องไม่ได้ (ตรวจสอบสิทธิ์ Manage Channels ของบอท)' });
             }
         }
 
