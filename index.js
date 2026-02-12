@@ -117,7 +117,6 @@ client.on('interactionCreate', async interaction => {
     if (interaction.isChatInputCommand()) {
         if (interaction.user.id !== OWNER_ID) return interaction.reply({ content: '❌ สำหรับซีม่อนเท่านั้นค่ะ!', ephemeral: true });
 
-        // Clear Command
         if (interaction.commandName === 'clear') {
             await interaction.deferReply({ ephemeral: true }); 
             const amt = interaction.options.getInteger('amount');
@@ -125,7 +124,6 @@ client.on('interactionCreate', async interaction => {
             return interaction.editReply({ content: `🧹 กวาดถูแชทเรียบร้อย **${amt}** ข้อความค่ะ! ✨`, ephemeral: true });
         }
 
-        // Giveaway Command (Back-end Panel)
         if (interaction.commandName === 'giveaway') {
             const embed = new EmbedBuilder().setColor('#FF69B4').setTitle('⚙️ ตั้งค่ากิจกรรม Giveaway (หลังบ้าน)').setDescription('**กรุณาเลือกประเภทรางวัลที่ต้องการแจกค่ะ:**\n\n🛡️ **บทบาท:** แจกยศในเซิร์ฟ (บอทมอบให้เอง)\n🔗 **ลิ้งก์:** แจกซองอั่งเปา / เว็บไซต์\n📝 **ข้อความ:** แจกคีย์เกม / โค้ดลับ').setThumbnail(interaction.guild.iconURL());
             const row = new ActionRowBuilder().addComponents(
@@ -136,7 +134,6 @@ client.on('interactionCreate', async interaction => {
             return interaction.reply({ embeds: [embed], components: [row] });
         }
 
-        // Setup Commands
         await interaction.deferReply({ ephemeral: true });
         try {
             if (interaction.commandName === 'setup-level') {
@@ -195,7 +192,6 @@ client.on('interactionCreate', async interaction => {
              return interaction.reply({ content: '❌ เฉพาะซีม่อนเท่านั้นค่ะ', ephemeral: true });
         }
 
-        // 1. เลือกประเภทรางวัล -> เด้ง Modal ใส่รางวัล+เวลาเลย
         if (interaction.customId.startsWith('gw_type_')) {
             const type = interaction.customId.replace('gw_type_', '');
             giveawaySetup.set(interaction.user.id, { prizeType: type, winners: 1 });
@@ -224,7 +220,6 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // --- Handling Select Menu (Role) ---
     if (interaction.isRoleSelectMenu() && interaction.customId === 'gw_set_role') {
         const setup = giveawaySetup.get(interaction.user.id);
         setup.prizes = [interaction.values[0]]; 
@@ -235,7 +230,6 @@ client.on('interactionCreate', async interaction => {
         await interaction.showModal(modal);
     }
 
-    // --- Handling Channel Select ---
     if (interaction.isChannelSelectMenu()) {
         const setup = giveawaySetup.get(interaction.user.id);
         if (interaction.customId === 'gw_select_target') {
@@ -269,9 +263,7 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // --- 3. Modals Submit ---
     if (interaction.isModalSubmit()) {
-        
         if (interaction.customId === 'gw_input_prize_time') {
             const setup = giveawaySetup.get(interaction.user.id);
             setup.prizes = [interaction.fields.getTextInputValue('prize_value')];
@@ -329,18 +321,17 @@ client.on('interactionCreate', async interaction => {
             await interaction.update({ embeds: [embed] });
         }
 
-        // CLAIM PRIZE (NEW: EPHEMERAL REPLY)
+        // CLAIM PRIZE (NEW: EPHEMERAL REPLY - เห็นคนเดียว)
         if (interaction.customId.startsWith('claim_')) {
             const gwId = interaction.customId.split('_')[1];
             const gw = activeGiveaways.get(gwId);
             
             if (!gw || !gw.winnersList) return interaction.reply({ content: '❌ ข้อมูลกิจกรรมหมดอายุ (บอทรีสตาร์ท) กรุณาติดต่อแอดมินรับมือค่ะ', ephemeral: true });
-            
             if (!gw.winnersList.includes(interaction.user.id)) return interaction.reply({ content: '❌ ตัวเองไม่ใช่ผู้ชนะน้าา', ephemeral: true });
             
             const prize = gw.prizes[0];
             
-            // ตอบกลับแบบเห็นคนเดียว (Ephemeral)
+            // ROLE PRIZE
             if (gw.prizeType === 'role') {
                 const role = interaction.guild.roles.cache.get(prize);
                 if (role) {
@@ -349,13 +340,16 @@ client.on('interactionCreate', async interaction => {
                 } else {
                     await interaction.reply({ content: `❌ หายศไม่เจอแล้วค่ะ (อาจถูกลบ)`, ephemeral: true });
                 }
-            } else if (gw.prizeType === 'link') {
+            } 
+            // LINK PRIZE (ปุ่มลิ้งก์)
+            else if (gw.prizeType === 'link') {
                 const embed = new EmbedBuilder().setColor('Green').setTitle('🔗 รางวัลของคุณมาแล้ว!').setDescription('กดปุ่มด้านล่างเพื่อรับรางวัลได้เลยค่ะ 👇');
                 const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('👉 คลิกเพื่อเปิดลิ้งก์').setStyle(ButtonStyle.Link).setURL(prize));
                 await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
-            } else { // text
-                const embed = new EmbedBuilder().setColor('Green').setTitle('📝 รางวัลของคุณมาแล้ว!').setDescription(`**ยินดีด้วยนะคะ! นี่คือรางวัลของคุณ:**\n\n\`\`\`${prize}\`\`\`\n*(จิ้มที่ข้อความเพื่อคัดลอก)*`);
-                await interaction.reply({ embeds: [embed], ephemeral: true });
+            } 
+            // TEXT PRIZE (ข้อความ Copy)
+            else { 
+                await interaction.reply({ content: `🎉 **ยินดีด้วยค่ะ! รางวัลของคุณคือ:**\n\`\`\`${prize}\`\`\`\n*(จิ้มที่ข้อความเพื่อคัดลอก)*`, ephemeral: true });
             }
         }
 
@@ -375,7 +369,6 @@ client.on('interactionCreate', async interaction => {
             }
         }
 
-        // Ticket & Level
         if (interaction.customId === 'open_ticket') {
             const cName = `ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
             if (interaction.guild.channels.cache.find(c => c.name === cName)) return interaction.reply({ content: '❌ มีห้องเดิมอยู่แล้วนะคะ', ephemeral: true });
@@ -400,7 +393,6 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// ฟังก์ชันจบ Giveaway
 async function endGiveaway(gw) {
     try {
         const channel = client.channels.cache.get(gw.channelId);
@@ -428,7 +420,6 @@ async function endGiveaway(gw) {
         await msg.edit({ content: `🎉 **ยินดีด้วยค่ะ!**`, embeds: [resultEmbed], components: [claimRow] });
 
         if (logChannel) {
-            // Log แจ้งเตือนแค่ชื่อคนชนะ (ตามสั่ง)
             const logEmbed = new EmbedBuilder().setColor('#00FF00').setTitle('📢 ประกาศผล Giveaway').setDescription(`🎉 ยินดีด้วยกับ: ${winners.map(id => `<@${id}>`).join(', ')}\n*(ผู้ชนะสามารถกดรับรางวัลได้ที่ห้องกิจกรรมเลยค่ะ)*`).setTimestamp();
             logChannel.send({ content: winners.map(id => `<@${id}>`).join(' '), embeds: [logEmbed] });
         }
