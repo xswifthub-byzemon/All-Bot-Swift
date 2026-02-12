@@ -196,18 +196,26 @@ client.on('interactionCreate', async interaction => {
              return interaction.reply({ content: '❌ เฉพาะซีม่อนเท่านั้นค่ะ', ephemeral: true });
         }
 
-        // 1. เลือกประเภทรางวัล
+        // 1. เลือกประเภทรางวัล -> ข้ามไปถามรางวัลเลย (ลบถามจำนวนคนแล้ว)
         if (interaction.customId.startsWith('gw_type_')) {
             const type = interaction.customId.replace('gw_type_', '');
-            giveawaySetup.set(interaction.user.id, { prizeType: type });
+            
+            // ตั้งค่า Default จำนวนคน = 1
+            giveawaySetup.set(interaction.user.id, { prizeType: type, winners: 1 });
 
             if (type === 'role') {
                 const row = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('gw_set_role').setPlaceholder('เลือกยศที่จะแจก...'));
                 await interaction.reply({ content: '🛡️ **กรุณาเลือกยศที่จะแจกให้ผู้ชนะค่ะ:**', components: [row], ephemeral: true });
             } else {
-                // *** จุดสำคัญ: ถามจำนวนผู้ชนะก่อน เพื่อสร้างช่องกรอกตามจำนวน ***
-                const modal = new ModalBuilder().setCustomId('gw_ask_winners_count').setTitle('ตั้งค่าจำนวนรางวัล');
-                modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('winners_count').setLabel("จำนวนผู้ชนะ (1-3)").setStyle(TextInputStyle.Short).setRequired(true)));
+                // Show Modal ใส่ของรางวัล (ชิ้นเดียว)
+                const modal = new ModalBuilder().setCustomId('gw_input_prize_single').setTitle('ใส่ของรางวัล (1 รางวัล)');
+                modal.addComponents(new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('prize_value')
+                        .setLabel(type === 'link' ? "ลิ้งก์ (เช่น อั่งเปา/เว็บ)" : "ข้อความ (เช่น คีย์เกม)")
+                        .setStyle(TextInputStyle.Paragraph)
+                        .setRequired(true)
+                ));
                 await interaction.showModal(modal);
             }
         }
@@ -216,7 +224,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.isRoleSelectMenu() && interaction.customId === 'gw_set_role') {
         const setup = giveawaySetup.get(interaction.user.id);
         setup.prizes = [interaction.values[0]]; 
-        setup.winners = 1; 
+        // setup.winners = 1; (ตั้งไว้แล้ว)
         giveawaySetup.set(interaction.user.id, setup);
         
         const modal = new ModalBuilder().setCustomId('gw_ask_duration').setTitle('ตั้งค่าเวลากิจกรรม');
@@ -236,9 +244,9 @@ client.on('interactionCreate', async interaction => {
             // --- เริ่มกิจกรรม (Launch) ---
             const targetCh = interaction.guild.channels.cache.get(setup.targetCh);
             const logCh = interaction.guild.channels.cache.get(setup.logCh);
-            let prizeText = setup.prizeType === 'role' ? `<@&${setup.prizes[0]}>` : `🎁 มีผู้โชคดี ${setup.winners} ท่าน (ลุ้นรางวัลใน DM)`;
+            let prizeText = setup.prizeType === 'role' ? `<@&${setup.prizes[0]}>` : `🎁 1 รางวัล (ลุ้นรางวัลใน DM)`;
             
-            const embed = new EmbedBuilder().setColor('#FFD700').setTitle('🎊 กิจกรรม GIVEAWAY ✨').setDescription(`🎁 **รางวัล:** **${prizeText}**\n👥 **จำนวนผู้โชคดี:** **${setup.winners} ท่าน**\n⏳ **เวลา:** **${setup.duration}**\n\n⬇️ **รายชื่อผู้เข้าร่วม (Real-time):**\n(รอคนกดปุ่ม...)`).setFooter({ text: 'กดปุ่มด้านล่างเพื่อเข้าร่วม! (เวลาจะเริ่มนับเมื่อมีคนแรกกด)' });
+            const embed = new EmbedBuilder().setColor('#FFD700').setTitle('🎊 กิจกรรม GIVEAWAY ✨').setDescription(`🎁 **รางวัล:** **${prizeText}**\n👥 **จำนวนผู้โชคดี:** **1 ท่าน**\n⏳ **เวลา:** **${setup.duration}**\n\n⬇️ **รายชื่อผู้เข้าร่วม (Real-time):**\n(รอคนกดปุ่ม...)`).setFooter({ text: 'กดปุ่มด้านล่างเพื่อเข้าร่วม! (เวลาจะเริ่มนับเมื่อมีคนแรกกด)' });
             const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('join_giveaway').setLabel('เข้าร่วมกิจกรรม').setEmoji('🎉').setStyle(ButtonStyle.Success));
             
             const gmsg = await targetCh.send({ embeds: [embed], components: [row] });
@@ -251,7 +259,7 @@ client.on('interactionCreate', async interaction => {
                 logChannelId: logCh.id,
                 prizes: setup.prizes,
                 prizeType: setup.prizeType,
-                winnersCount: parseInt(setup.winners),
+                winnersCount: 1, // Fixed 1
                 duration: ms(setup.duration),
                 startTime: null,
                 participants: []
@@ -261,39 +269,11 @@ client.on('interactionCreate', async interaction => {
 
     // --- 3. Modals Submit ---
     if (interaction.isModalSubmit()) {
-        // Step 1: รับจำนวนคน -> สร้างช่องกรอกรางวัล (1-3 ช่อง)
-        if (interaction.customId === 'gw_ask_winners_count') {
-            const count = parseInt(interaction.fields.getTextInputValue('winners_count'));
-            if (isNaN(count) || count < 1 || count > 3) return interaction.reply({ content: '❌ ใส่ได้แค่ 1-3 คนครับ', ephemeral: true });
-            
-            const setup = giveawaySetup.get(interaction.user.id);
-            setup.winners = count;
-            giveawaySetup.set(interaction.user.id, setup);
-
-            const modal = new ModalBuilder().setCustomId('gw_input_prizes').setTitle(`ใส่ของรางวัล (${count} ชิ้น)`);
-            
-            // Loop สร้างช่องกรอกตามจำนวน
-            for (let i = 0; i < count; i++) {
-                modal.addComponents(new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId(`prize_${i}`)
-                        .setLabel(`รางวัลชิ้นที่ ${i+1} ${setup.prizeType === 'link' ? '(ลิ้งก์)' : '(ข้อความ)'}`)
-                        .setStyle(TextInputStyle.Paragraph)
-                        .setRequired(true)
-                ));
-            }
-            await interaction.showModal(modal);
-        }
         
-        // Step 2: รับค่ารางวัล -> ถามเวลา
-        else if (interaction.customId === 'gw_input_prizes') {
+        // รับค่ารางวัล (กรณี Link/Text 1 รางวัล) -> ถามเวลา
+        if (interaction.customId === 'gw_input_prize_single') {
             const setup = giveawaySetup.get(interaction.user.id);
-            setup.prizes = [];
-            
-            // เก็บข้อมูลรางวัลลง Array
-            for (let i = 0; i < setup.winners; i++) {
-                setup.prizes.push(interaction.fields.getTextInputValue(`prize_${i}`));
-            }
+            setup.prizes = [interaction.fields.getTextInputValue('prize_value')];
             giveawaySetup.set(interaction.user.id, setup);
 
             const modal = new ModalBuilder().setCustomId('gw_ask_duration').setTitle('ตั้งค่าเวลากิจกรรม');
@@ -301,7 +281,7 @@ client.on('interactionCreate', async interaction => {
             await interaction.showModal(modal);
         }
 
-        // Step 3: รับเวลา -> เลือกห้อง
+        // รับเวลา -> เลือกห้อง
         else if (interaction.customId === 'gw_ask_duration') {
             const setup = giveawaySetup.get(interaction.user.id);
             setup.duration = interaction.fields.getTextInputValue('duration');
@@ -345,9 +325,9 @@ client.on('interactionCreate', async interaction => {
             const listStr = gw.participants.map((id, index) => `${index + 1}. <@${id}>`).join('\n');
             const embed = EmbedBuilder.from(interaction.message.embeds[0]);
             let timeText = gw.startTime ? `สิ้นสุด: <t:${Math.floor((gw.startTime + gw.duration)/1000)}:R>` : `เวลา: ${setup ? setup.duration : '...'} (เริ่มนับเมื่อมีคนกด)`;
-            let prizeText = gw.prizeType === 'role' ? `<@&${gw.prizes[0]}>` : `🎁 มีผู้โชคดี ${gw.winnersCount} ท่าน (ลุ้นรางวัลใน DM)`;
+            let prizeText = gw.prizeType === 'role' ? `<@&${gw.prizes[0]}>` : `🎁 1 รางวัล (ลุ้นรางวัลใน DM)`;
 
-            embed.setDescription(`🎁 **รางวัล:** **${prizeText}**\n👥 **ผู้โชคดี:** **${gw.winnersCount} ท่าน**\n⏳ **${timeText}**\n\n⬇️ **รายชื่อผู้เข้าร่วม (${gw.participants.length}):**\n${listStr.substring(0, 1000)}`);
+            embed.setDescription(`🎁 **รางวัล:** **${prizeText}**\n👥 **ผู้โชคดี:** **1 ท่าน**\n⏳ **${timeText}**\n\n⬇️ **รายชื่อผู้เข้าร่วม (${gw.participants.length}):**\n${listStr.substring(0, 1000)}`);
             await interaction.update({ embeds: [embed] });
         }
 
@@ -361,8 +341,7 @@ client.on('interactionCreate', async interaction => {
             const winnerIndex = gw.winnersList.indexOf(interaction.user.id);
             if (winnerIndex === -1) return interaction.reply({ content: '❌ ตัวเองไม่ใช่ผู้ชนะน้าา', ephemeral: true });
             
-            // *** ดึงรางวัลเฉพาะคนนั้น ***
-            const prize = gw.prizes[winnerIndex] || gw.prizes[0]; 
+            const prize = gw.prizes[0]; // รางวัลเดียว
             
             await interaction.reply({ content: '🎉 **กำลังส่งของรางวัลให้ทาง DM...**', ephemeral: true });
             
