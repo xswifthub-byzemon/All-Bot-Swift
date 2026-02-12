@@ -127,7 +127,6 @@ client.on('interactionCreate', async interaction => {
         }
 
         if (interaction.commandName === 'giveaway') {
-            // ส่งแบบธรรมดา (เห็นทุกคน) ตามสั่ง
             const embed = new EmbedBuilder().setColor('#FF69B4').setTitle('⚙️ ตั้งค่ากิจกรรม Giveaway (หลังบ้าน)').setDescription('**กรุณาเลือกประเภทรางวัลที่ต้องการแจกค่ะ:**\n\n🛡️ **บทบาท:** แจกยศในเซิร์ฟ (บอทมอบให้เอง)\n🔗 **ลิ้งก์:** แจกซองอั่งเปา / เว็บไซต์\n📝 **ข้อความ:** แจกคีย์เกม / โค้ดลับ').setThumbnail(interaction.guild.iconURL());
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('gw_type_role').setLabel('แจกบทบาท').setEmoji('🛡️').setStyle(ButtonStyle.Primary),
@@ -224,7 +223,6 @@ client.on('interactionCreate', async interaction => {
     if (interaction.isRoleSelectMenu() && interaction.customId === 'gw_set_role') {
         const setup = giveawaySetup.get(interaction.user.id);
         setup.prizes = [interaction.values[0]]; 
-        // setup.winners = 1; (ตั้งไว้แล้ว)
         giveawaySetup.set(interaction.user.id, setup);
         
         const modal = new ModalBuilder().setCustomId('gw_ask_duration').setTitle('ตั้งค่าเวลากิจกรรม');
