@@ -189,7 +189,7 @@ client.on('interactionCreate', async interaction => {
         } catch (e) { console.error(e); }
     }
 
-    // --- 2. Giveaway Setup Logic (แก้ Modal Crash โดยการรวมขั้นตอน) ---
+    // --- 2. Giveaway Setup Logic ---
     if (interaction.isButton()) {
         if (interaction.user.id !== OWNER_ID && interaction.customId.startsWith('gw_')) {
              return interaction.reply({ content: '❌ เฉพาะซีม่อนเท่านั้นค่ะ', ephemeral: true });
@@ -259,6 +259,7 @@ client.on('interactionCreate', async interaction => {
             const gmsg = await targetCh.send({ embeds: [embed], components: [row] });
             await interaction.update({ content: `✅ **กิจกรรมเริ่มแล้ว!**\n📍 ห้องกิจกรรม: <#${targetCh.id}>\n🔔 ห้องแจ้งเตือน: <#${logCh.id}>`, components: [] });
 
+            // Save active giveaway
             activeGiveaways.set(gmsg.id, {
                 messageId: gmsg.id,
                 channelId: targetCh.id,
@@ -337,7 +338,7 @@ client.on('interactionCreate', async interaction => {
             await interaction.update({ embeds: [embed] });
         }
 
-        // CLAIM PRIZE
+        // CLAIM PRIZE (Fix: DM Sending)
         if (interaction.customId.startsWith('claim_')) {
             const gwId = interaction.customId.split('_')[1];
             const gw = activeGiveaways.get(gwId);
@@ -348,7 +349,8 @@ client.on('interactionCreate', async interaction => {
             
             const prize = gw.prizes[0];
             
-            await interaction.reply({ content: '🎉 **กำลังส่งของรางวัลให้ทาง DM...**', ephemeral: true });
+            // ใช้ deferReply เพื่อให้บอทมีเวลาส่ง DM
+            await interaction.deferReply({ ephemeral: true });
             
             try {
                 const dmEmbed = new EmbedBuilder().setColor('Gold').setTitle('🎁 ของรางวัลมาแล้ว!').setFooter({text: 'xSwift Hub Giveaway'});
@@ -366,11 +368,14 @@ client.on('interactionCreate', async interaction => {
                     dmEmbed.setDescription(`ยินดีด้วย! นี่คือโค้ดรางวัลของคุณค่ะ 👇\n\`\`\`${prize}\`\`\`\n(กดค้างเพื่อคัดลอก)`);
                 }
                 
+                // ส่ง DM
                 await interaction.user.send({ embeds: [dmEmbed], components });
-                await interaction.followUp({ content: '✅ **ส่งเรียบร้อย! เช็ค DM ได้เลยค่ะ**', ephemeral: true });
+                // แจ้งเตือนหน้าแชทเมื่อส่งสำเร็จ
+                await interaction.editReply({ content: '✅ **ส่งเรียบร้อย! เช็ค DM ได้เลยค่ะ** 📨' });
             } catch (e) {
                 console.error(e);
-                await interaction.followUp({ content: '❌ **ส่ง DM ไม่ได้** (ตัวเองปิด DM หรือเปล่า?) รบกวนเปิดแล้วกดใหม่นะคะ', ephemeral: true });
+                // แจ้งเตือนเมื่อส่งไม่สำเร็จ
+                await interaction.editReply({ content: '❌ **ส่ง DM ไม่ได้** (ตัวเองปิด DM หรือเปล่า?) รบกวนเปิดแล้วกดใหม่นะคะ' });
             }
         }
 
