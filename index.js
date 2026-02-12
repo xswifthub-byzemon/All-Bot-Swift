@@ -23,7 +23,11 @@ const TOKEN = process.env.TOKEN || 'ใส่_TOKEN_บอท_ตรงนี้
 const CLIENT_ID = process.env.CLIENT_ID || 'ใส่_CLIENT_ID_บอท_ตรงนี้'; 
 const OWNER_ID = process.env.OWNER_ID || 'ใส่_ไอดี_ซีม่อน_ตรงนี้'; 
 
-let antiLinkChannels = []; 
+// ฐานข้อมูลจำลอง (แนะนำว่าถ้าบอทรีสตาร์ทข้อมูลจะหาย ควรใช้ Database จริงในอนาคตนะคะ)
+const db = {
+    users: {}, // { userId: { xp: 0, level: 1, lastMsg: 0 } }
+    config: { antiLink: [] }
+};
 
 // --- 🛡️ ระบบกันบอทตาย ---
 process.on('unhandledRejection', error => console.error('Unhandled Rejection:', error));
@@ -34,7 +38,8 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers, 
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent 
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildVoiceStates
     ],
     partials: [Partials.Channel, Partials.Message, Partials.Reaction]
 });
@@ -48,7 +53,18 @@ const commands = [
     new SlashCommandBuilder().setName('clear').setDescription('🧹 ลบข้อความ').setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addIntegerOption(o => o.setName('amount').setDescription('จำนวน (1-100)').setMinValue(1).setMaxValue(100).setRequired(true)),
     new SlashCommandBuilder().setName('setup-tell-dm').setDescription('💌 สร้างหน้า Panel ฝากบอก DM').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     new SlashCommandBuilder().setName('giveaway').setDescription('🎉 เริ่มกิจกรรมแจกรางวัล').setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addStringOption(o => o.setName('prize').setDescription('ของรางวัล').setRequired(true)).addStringOption(o => o.setName('duration').setDescription('เวลา (เช่น 1m, 1h)').setRequired(true)).addIntegerOption(o => o.setName('winners').setDescription('จำนวนผู้ชนะ').setMinValue(1).setRequired(true)),
-    new SlashCommandBuilder().setName('setup-antilink').setDescription('🛡️ ตั้งค่าห้องห้ามส่งลิงก์').setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addChannelOption(o => o.setName('channel').setDescription('เลือกห้อง').addChannelTypes(ChannelType.GuildText).setRequired(true))
+    new SlashCommandBuilder().setName('setup-antilink').setDescription('🛡️ ตั้งค่าห้องห้ามส่งลิงก์').setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addChannelOption(o => o.setName('channel').setDescription('เลือกห้อง').addChannelTypes(ChannelType.GuildText).setRequired(true)),
+    
+    // ✨ คำสั่งใหม่: Setup ระบบเลเวล
+    new SlashCommandBuilder()
+        .setName('setup-level')
+        .setDescription('📊 สร้างหน้า Panel อธิบายระบบเลเวล (Admin Only)')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addRoleOption(o => o.setName('lv20').setDescription('ยศเลเวล 20').setRequired(true))
+        .addRoleOption(o => o.setName('lv40').setDescription('ยศเลเวล 40').setRequired(true))
+        .addRoleOption(o => o.setName('lv60').setDescription('ยศเลเวล 60').setRequired(true))
+        .addRoleOption(o => o.setName('lv80').setDescription('ยศเลเวล 80').setRequired(true))
+        .addRoleOption(o => o.setName('lv100').setDescription('ยศเลเวล 100').setRequired(true))
 ]
 .map(command => command.toJSON());
 
@@ -64,16 +80,55 @@ client.once('ready', async () => {
     }, 3000); 
 
     try { await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands }); } catch (e) { console.error(e); }
+
+    // ระบบ Voice XP: ตรวจสอบคนในห้องเสียงทุก 5 นาที
+    setInterval(() => {
+        client.guilds.cache.forEach(guild => {
+            guild.voiceStates.cache.forEach(vs => {
+                if (vs.member.user.bot || vs.mute || vs.deaf) return;
+                addXP(vs.member.id, 10, guild); // แจก XP เล็กน้อย
+            });
+        });
+    }, 300000);
 });
 
-// --- 🛡️ ระบบ Anti-Link ---
+// ฟังก์ชันคำนวณและเพิ่ม XP
+function addXP(userId, amount, guild) {
+    if (!db.users[userId]) db.users[userId] = { xp: 0, level: 1, lastMsg: 0 };
+    db.users[userId].xp += amount;
+    
+    let nextLevelXP = db.users[userId].level * 500; // สูตรคำนวณให้เวลขึ้นยาก
+    if (db.users[userId].xp >= nextLevelXP && db.users[userId].level < 100) {
+        db.users[userId].level++;
+        db.users[userId].xp = 0;
+        return true; // Level Up!
+    }
+    return false;
+}
+
+// --- 🛡️ ระบบ Message Events (XP + AntiLink) ---
 client.on('messageCreate', async message => {
-    if (message.author.bot || !antiLinkChannels.includes(message.channelId)) return;
-    const linkRegex = /(https?:\/\/[^\s]+)/g;
-    if (linkRegex.test(message.content)) {
-        await message.delete().catch(() => {});
-        const warn = await message.channel.send({ content: `❌ **ระวังค่ะคุณ <@${message.author.id}>!** ห้องนี้ห้ามส่งลิงก์ทุกรูปแบบนะคะ ปายขอลบออกเพื่อความปลอดภัยของเซิร์ฟเวอร์น้า~ 🛡️✨` });
-        setTimeout(() => warn.delete().catch(() => {}), 10000); // 10 วินาทีหายไปเอง
+    if (message.author.bot || !message.guild) return;
+
+    // 1. ระบบ XP
+    if (Date.now() - (db.users[message.author.id]?.lastMsg || 0) > 60000) {
+        const leveledUp = addXP(message.author.id, Math.floor(Math.random() * 6) + 5, message.guild);
+        if (!db.users[message.author.id]) db.users[message.author.id] = { xp: 0, level: 1, lastMsg: 0 };
+        db.users[message.author.id].lastMsg = Date.now();
+
+        if (leveledUp) {
+            message.channel.send(`🎊 ยินดีด้วยค่ะคุณ <@${message.author.id}>! เลเวลอัปเป็น **Lv.${db.users[message.author.id].level}** แล้วน้าา เก่งที่สุดเลย! 💖✨`).then(m => setTimeout(() => m.delete(), 10000));
+        }
+    }
+
+    // 2. ระบบ Anti-Link
+    if (db.config.antiLink.includes(message.channelId)) {
+        const linkRegex = /(https?:\/\/[^\s]+)/g;
+        if (linkRegex.test(message.content)) {
+            await message.delete().catch(() => {});
+            const warn = await message.channel.send({ content: `❌ **ระวังค่ะคุณ <@${message.author.id}>!** ห้องนี้ห้ามส่งลิงก์ทุกรูปแบบนะคะ ปายขอลบออกเพื่อความปลอดภัยน้า~ 🛡️✨` });
+            setTimeout(() => warn.delete().catch(() => {}), 10000); 
+        }
     }
 });
 
@@ -84,201 +139,126 @@ client.on('interactionCreate', async interaction => {
 
         if (interaction.commandName !== 'giveaway') await interaction.deferReply({ ephemeral: true });
 
-        // 1️⃣ Setup Verify
+        // --- ระบบ Level Setup ---
+        if (interaction.commandName === 'setup-level') {
+            const roles = {
+                20: interaction.options.getRole('lv20'),
+                40: interaction.options.getRole('lv40'),
+                60: interaction.options.getRole('lv60'),
+                80: interaction.options.getRole('lv80'),
+                100: interaction.options.getRole('lv100')
+            };
+
+            const embed = new EmbedBuilder()
+                .setColor('#FFD700')
+                .setTitle('📊 ระบบเลเวลสังคมแห่งการแบ่งปัน xSwift Hub 🏆')
+                .setDescription(`ยินดีต้อนรับเข้าสู่ระบบ Rank ของเราค่ะ! ยิ่งคุณมีส่วนร่วมมากเท่าไหร่ เลเวลก็จะยิ่งสูงขึ้นน้าา ✨\n\n**วิธีการสะสม XP (ขึ้นยากนิดนึงน้า):**\n💬 **พิมพ์พูดคุย:** ได้รับ XP ทุกนาทีที่พิมพ์\n🔊 **เข้าห้องเสียง:** ได้รับ XP ทุกๆ 5 นาทีที่สถิตอยู่\n🎁 **เข้าร่วมกิจกรรม:** รับแต้มพิเศษจากแอดมิน\n\n**รางวัลแห่งความพยายาม:**\n🎖️ **Lv.20:** <@&${roles[20].id}> - ความสามารถ: ปลดล็อกอิโมจิพิเศษ\n🥈 **Lv.40:** <@&${roles[40].id}> - ความสามารถ: พิมพ์ในห้องลับได้\n🥇 **Lv.60:** <@&${roles[60].id}> - ความสามารถ: สิทธิพิเศษในกิจกรรม Giveaway\n💎 **Lv.80:** <@&${roles[80].id}> - ความสามารถ: มีสิทธิ์เสนอไอเดียพัฒนาเซิร์ฟเวอร์\n👑 **Lv.100:** <@&${roles[100].id}> - **ระดับตำนาน!** ได้สิทธิ์ร่วมตัดสินใจทิศทางเซิร์ฟ\n\n*มาพยายามไปด้วยกันนะคะ ตันที่เลเวล 100 ค่ะ! 💖*`)
+                .setImage('https://i.pinimg.com/originals/a0/0c/3b/a00c3b3186105a305d2f627d35398246.gif')
+                .setFooter({ text: 'เช็คเลเวลของตัวเองได้ที่ปุ่มด้านล่างน้าา 👇' });
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('check_level').setLabel('📊 เช็คเลเวลของฉัน').setStyle(ButtonStyle.Primary)
+            );
+
+            await interaction.channel.send({ embeds: [embed], components: [row] });
+            await interaction.editReply('✅ ติดตั้งระบบเลเวลเรียบร้อยค่ะ!');
+        }
+
+        // --- ระบบเดิมอื่นๆ (ห้ามลบ) ---
         if (interaction.commandName === 'setup-verify') {
             const role = interaction.options.getRole('role');
-            const embed = new EmbedBuilder()
-                .setColor('#FF69B4')
-                .setTitle('✨ ยินดีต้อนรับสู่ครอบครัว xSwift Hub ✨')
-                .setDescription(`ยินดีต้อนรับเพื่อนๆ ทุกคนเข้าสู่สังคมแห่งการแบ่งปันนะคะ! 🎉\n\n**ขั้นตอนการเข้าสู่เซิร์ฟเวอร์:**\n1️⃣ อ่านกฎระเบียบของเซิร์ฟเวอร์ให้เรียบร้อย\n2️⃣ กดปุ่มสีเขียวด้านล่างเพื่อยืนยันตัวตน\n3️⃣ รับยศ <@&${role.id}> เพื่อเปิดห้องพูดคุยทั้งหมด\n\n*ขอให้สนุกกับการสร้างมิตรภาพใหม่ๆ นะคะ! 💖*`)
-                .setImage('https://media.discordapp.net/attachments/1079089989930745917/1105497258381594684/standard.gif')
-                .setFooter({ text: 'ระบบยืนยันตัวตนโดย น้องปาย ⚙️' });
+            const embed = new EmbedBuilder().setColor('#FF69B4').setTitle('✨ ยืนยันตัวตนเข้าสู่เซิร์ฟเวอร์ ✨').setDescription(`ยินดีต้อนรับเพื่อนๆ ทุกคนเข้าสู่สังคมแห่งการแบ่งปันนะคะ! 🎉\n\n**ขั้นตอนการเข้าสู่เซิร์ฟเวอร์:**\n1️⃣ อ่านกฎระเบียบของเซิร์ฟเวอร์ให้เรียบร้อย\n2️⃣ กดปุ่มสีเขียวด้านล่างเพื่อยืนยันตัวตน\n3️⃣ รับยศ <@&${role.id}> เพื่อเปิดห้องพูดคุยทั้งหมด\n\n*ขอให้สนุกกับการสร้างมิตรภาพใหม่ๆ นะคะ! 💖*`).setImage('https://media.discordapp.net/attachments/1079089989930745917/1105497258381594684/standard.gif');
             const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`verify_button_${role.id}`).setLabel('รับยศเข้าดิส').setEmoji('✅').setStyle(ButtonStyle.Success));
             await interaction.channel.send({ embeds: [embed], components: [row] });
             await interaction.editReply('✅ สร้างระบบรับยศเรียบร้อยค่ะ!');
         }
 
-        // 2️⃣ Setup Ticket (Community Ver.)
         if (interaction.commandName === 'setup-ticket') {
-            const embed = new EmbedBuilder()
-                .setColor('#00BFFF')
-                .setTitle('📩 ศูนย์ช่วยเหลือสมาชิก xSwift Hub 🛡️')
-                .setDescription(`สวัสดีค่ะ! หากเพื่อนๆ พบปัญหาหรือต้องการความช่วยเหลือ สามารถเปิดตั๋วได้ที่นี่เลยน้า\n\n**เรื่องที่สามารถติดต่อได้:**\n⚠️ แจ้งสมาชิกที่ทำผิดกฎ/นิสัยไม่ดี\n🛠️ แจ้งปัญหาการใช้งานในเซิร์ฟเวอร์\n💬 ติดต่อสอบถามแอดมินโดยตรง\n\n*ปายและแอดมินพร้อมดูแลทุกคนเสมอค่ะ! กดปุ่มด้านล่างได้เลย 👇*`)
-                .setImage('https://cdn.discordapp.com/attachments/1443746157082706054/1448377350961106964/Strawberry_Bunny_Banner___Tickets.jpg')
-                .setFooter({ text: 'Swift Hub Core System 🛡️' });
+            const embed = new EmbedBuilder().setColor('#00BFFF').setTitle('📩 ศูนย์ช่วยเหลือสมาชิก xSwift Hub 🛡️').setDescription(`สวัสดีค่ะ! หากเพื่อนๆ พบปัญหาหรือต้องการความช่วยเหลือ สามารถเปิดตั๋วได้ที่นี่เลยน้า\n\n**เรื่องที่สามารถติดต่อได้:**\n⚠️ แจ้งสมาชิกที่ทำผิดกฎ/นิสัยไม่ดี\n🛠️ แจ้งปัญหาการใช้งานในเซิร์ฟเวอร์\n💬 ติดต่อสอบถามแอดมินโดยตรง\n\n*ปายและแอดมินพร้อมดูแลทุกคนเสมอค่ะ! กดปุ่มด้านล่างได้เลย 👇*`).setImage('https://cdn.discordapp.com/attachments/1443746157082706054/1448377350961106964/Strawberry_Bunny_Banner___Tickets.jpg');
             const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('open_ticket').setLabel('แจ้งปัญหา / ติดต่อแอดมิน').setEmoji('📩').setStyle(ButtonStyle.Primary));
             await interaction.channel.send({ embeds: [embed], components: [row] });
             await interaction.editReply('✅ สร้างระบบตั๋วเรียบร้อยค่ะ!');
         }
 
-        // 3️⃣ Setup Tell DM
-        if (interaction.commandName === 'setup-tell-dm') {
-            const embed = new EmbedBuilder()
-                .setColor('#A020F0')
-                .setTitle('💌 บริการฝากบอกความในใจ (Tell DM) ✨')
-                .setDescription(`อยากบอกอะไรกับเพื่อนแต่ไม่กล้าทักไปตรงๆ ไหมคะ? ให้ปายช่วยสิ!\n\n**กติกาการใช้บริการ:**\n📝 พิมพ์ข้อความที่ต้องการส่ง (ใส่ได้ยาวๆ เลยค่ะ)\n👤 ระบุ User ID ของผู้รับให้ถูกต้อง\n💖 ปายจะส่งข้อความไปหาเขาทาง DM ทันที!\n\n*มาสร้างความประทับใจดีๆ ให้กันนะคะ กดปุ่มด้านล่างเลย 👇*`)
-                .setImage('https://i.pinimg.com/originals/c9/22/68/c92268d92cf2dbf96e3195683d9d3afc.gif');
-            const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('open_tell_dm_modal').setLabel('ส่งข้อความฝากบอก').setEmoji('💌').setStyle(ButtonStyle.Secondary));
-            await interaction.channel.send({ embeds: [embed], components: [row] });
-            await interaction.editReply('✅ สร้างระบบฝากบอกเรียบร้อยค่ะ!');
-        }
-
-        // 4️⃣ Giveaway (Advanced System)
         if (interaction.commandName === 'giveaway') {
             const prize = interaction.options.getString('prize');
             const dur = interaction.options.getString('duration');
             const wins = interaction.options.getInteger('winners');
-            const embed = new EmbedBuilder()
-                .setColor('#FFD700')
-                .setTitle('🎊 กิจกรรม GIVEAWAY สุดพิเศษ! 🎊')
-                .setDescription(`มาลุ้นรับรางวัลกันเถอะทุกคน! ✨\n\n🎁 **รางวัล:** **${prize}**\n👥 **จำนวนผู้โชคดี:** **${wins} ท่าน**\n⏳ **ระยะเวลา:** **${dur}**\n\n*กดปุ่มด้านล่างเพื่อลงชื่อลุ้นรางวัลได้เลยน้า ขอให้ทุกคนโชคดีนะคะ! 💖*`)
-                .setFooter({ text: `สิ้นสุดกิจกรรมในอีก: ${dur}` });
+            const embed = new EmbedBuilder().setColor('#FFD700').setTitle('🎊 กิจกรรม GIVEAWAY สุดพิเศษ! 🎊').setDescription(`มาลุ้นรับรางวัลกันเถอะทุกคน! ✨\n\n🎁 **รางวัล:** **${prize}**\n👥 **จำนวนผู้โชคดี:** **${wins} ท่าน**\n⏳ **ระยะเวลา:** **${dur}**\n\n*กดปุ่มด้านล่างเพื่อลงชื่อลุ้นรางวัลได้เลยน้า ขอให้ทุกคนโชคดีนะคะ! 💖*`);
             const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('join_giveaway').setLabel('เข้าร่วมกิจกรรม').setEmoji('🎁').setStyle(ButtonStyle.Primary));
             const gmsg = await interaction.channel.send({ embeds: [embed], components: [row] });
             await interaction.reply({ content: '✅ เริ่มกิจกรรมแจกของแล้วค่ะ!', ephemeral: true });
-
             let entry = [];
             const col = gmsg.createMessageComponentCollector({ time: ms(dur) });
-
             col.on('collect', i => {
                 if (entry.includes(i.user.id)) return i.reply({ content: 'ตัวเองกดไปแล้วน้า รอประกาศผลได้เลยค่ะ! 🌟', ephemeral: true });
                 entry.push(i.user.id);
                 i.reply({ content: 'ลงชื่อสำเร็จ! ปายลงชื่อให้เรียบร้อยแล้วนะคะ ขอให้โชคดีน้า~ 💖', ephemeral: true });
             });
-
             col.on('end', async () => {
-                if (entry.length === 0) return gmsg.edit({ content: '❌ กิจกรรมจบลงแล้วแต่ไม่มีผู้เข้าร่วมเลยง่า... เสียใจจัง 🥺', embeds: [], components: [] });
+                if (entry.length === 0) return gmsg.edit({ content: '❌ ไม่มีคนร่วมเลยง่า...', embeds: [], components: [] });
                 const winners = entry.sort(() => 0.5 - Math.random()).slice(0, wins);
-                const expiryTime = Date.now() + (10 * 60 * 60 * 1000); // 10 ชั่วโมง
-
-                const resultEmbed = new EmbedBuilder()
-                    .setColor('#FFD700')
-                    .setTitle('🎊 ประกาศรายชื่อผู้โชคดี! 🎊')
-                    .setDescription(`ยินดีด้วยกับผู้ที่ได้รับ **${prize}** นะคะ!\n\n🏆 **ผู้ชนะคือ:** ${winners.map(w => `<@${w}>`).join(', ')}\n\n⚠️ **เงื่อนไขสำคัญ:**\nกรุณากดปุ่ม **"🎁 รับรางวัลที่นี่"** ด้านล่างภายใน **10 ชั่วโมง** นะคะ\nหากไม่กดรับภายในเวลาที่กำหนด รางวัลจะถือว่าเป็น **"โมฆะ"** ทันทีค่ะ! ❌`)
-                    .setFooter({ text: 'ขอแสดงความยินดีด้วยนะคะ! 💖' });
-
-                const claimRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`claim_${prize}_${expiryTime}`).setLabel('🎁 รับรางวัลที่นี่').setStyle(ButtonStyle.Success)
-                );
-
+                const expiry = Date.now() + (10 * 60 * 60 * 1000);
+                const resultEmbed = new EmbedBuilder().setColor('#FFD700').setTitle('🎊 ประกาศรายชื่อผู้โชคดี! 🎊').setDescription(`ยินดีด้วยกับผู้ที่ได้รับ **${prize}** นะคะ!\n🏆 **ผู้ชนะ:** ${winners.map(w => `<@${w}>`).join(', ')}\n⚠️ กดรับรางวัลภายใน 10 ชม. นะคะ!`).setFooter({ text: 'ยินดีด้วยนะคะ! 💖' });
+                const claimRow = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`claim_${prize}_${expiry}`).setLabel('🎁 รับรางวัลที่นี่').setStyle(ButtonStyle.Success));
                 await gmsg.edit({ content: `🎊 ยินดีด้วยค่ะ! 🎉`, embeds: [resultEmbed], components: [claimRow] });
             });
         }
-        
-        // 5️⃣ Clear, Stats, Announce, AntiLink (เหมือนเดิมแต่ปรับปรุงข้อความ)
-        if (interaction.commandName === 'setup-stats') {
-            await interaction.guild.members.fetch();
-            const total = interaction.guild.memberCount;
-            const bots = interaction.guild.members.cache.filter(m => m.user.bot).size;
-            const humans = total - bots;
-            const cat = await interaction.guild.channels.create({ name: '📊 สถิติชาว xSwift Hub', type: ChannelType.GuildCategory });
-            await interaction.guild.channels.create({ name: `👨・สมาชิก: ${humans}`, type: ChannelType.GuildVoice, parent: cat.id, permissionOverwrites: [{ id: interaction.guild.id, deny: [PermissionFlagsBits.Connect] }] });
-            await interaction.guild.channels.create({ name: `🌎・รวมทั้งหมด: ${total}`, type: ChannelType.GuildVoice, parent: cat.id, permissionOverwrites: [{ id: interaction.guild.id, deny: [PermissionFlagsBits.Connect] }] });
-            await interaction.guild.channels.create({ name: `🤖・บอท: ${bots}`, type: ChannelType.GuildVoice, parent: cat.id, permissionOverwrites: [{ id: interaction.guild.id, deny: [PermissionFlagsBits.Connect] }] });
-            await interaction.editReply('✅ สร้างห้องสถิติเรียบร้อยค่ะ!');
-        }
-
-        if (interaction.commandName === 'announce') {
-            const title = interaction.options.getString('title');
-            const msg = interaction.options.getString('message');
-            const img = interaction.options.getAttachment('image');
-            const embed = new EmbedBuilder().setColor('#FFD700').setTitle(`📢 ${title}`).setDescription(msg).setTimestamp().setFooter({ text: `ประกาศโดย: ${interaction.user.username}` });
-            if (img) embed.setImage(img.url);
-            await interaction.channel.send({ content: '@everyone', embeds: [embed] });
-            await interaction.editReply('✅ ส่งประกาศเรียบร้อยค่ะ!');
-        }
-
-        if (interaction.commandName === 'clear') {
-            const amt = interaction.options.getInteger('amount');
-            await interaction.channel.bulkDelete(amt, true);
-            await interaction.editReply(`🧹 กวาดถูแชทให้แล้วค่ะ **${amt}** ข้อความ! ✨`);
-        }
-
-        if (interaction.commandName === 'setup-antilink') {
-            const ch = interaction.options.getChannel('channel');
-            if (!antiLinkChannels.includes(ch.id)) antiLinkChannels.push(ch.id);
-            await interaction.editReply(`🛡️ ห้อง <#${ch.id}> จะถูกปายเฝ้าระวังลิงก์อย่างเข้มงวดค่ะ!`);
-        }
     }
 
-    // --- 🔘 ระบบจัดการปุ่มต่างๆ ---
+    // --- 🔘 Interaction Handler (Buttons) ---
     if (interaction.isButton()) {
         
-        // รับรางวัล Giveaway 🎁
+        // ปุ่มเช็คเลเวล ✨
+        if (interaction.customId === 'check_level') {
+            const userData = db.users[interaction.user.id] || { xp: 0, level: 1 };
+            const nextXP = userData.level * 500;
+            const embed = new EmbedBuilder()
+                .setColor('#00FF7F')
+                .setTitle(`📈 ข้อมูลเลเวลของคุณ ${interaction.user.username}`)
+                .setDescription(`ปัจจุบันคุณอยู่ที่ **Lv.${userData.level}** ค่ะ! 🌟\n\n✨ **XP สะสม:** \`${userData.xp}\` / \`${nextXP}\` แต้ม\n📊 **ความก้าวหน้า:** \`${((userData.xp / nextXP) * 100).toFixed(1)}%\` กว่าจะถึงเลเวลถัดไป\n\n**วิธีหา XP เพิ่ม:**\n💬 พิมพ์คุยในห้องแชท (จำกัด 1 ครั้ง/นาที)\n🔊 ออนไลน์ในห้องเสียง (ยิ่งอยู่นานยิ่งได้เยอะ)\n🎁 ร่วมสนุกกิจกรรมในเซิร์ฟเวอร์\n\n*ข้อความนี้จะหายไปเองใน 15 วินาทีนะคะ สู้ๆ ค่ะ! 💖*`)
+                .setFooter({ text: 'Swift Hub Core Level System ⚙️' });
+
+            await interaction.reply({ embeds: [embed], ephemeral: true });
+            setTimeout(() => interaction.deleteReply().catch(() => {}), 15000);
+        }
+
+        // ปุ่มรับรางวัล (Giveaway)
         if (interaction.customId.startsWith('claim_')) {
             const [ , prize, expiry] = interaction.customId.split('_');
-            
-            // เช็คว่าหมดเวลา 10 ชม. หรือยัง
-            if (Date.now() > parseInt(expiry)) {
-                return interaction.reply({ content: `❌ **หมดเวลารับรางวัลแล้วค่ะ!** รางวัลนี้เป็นโมฆะตามที่ระบุไว้ในประกาศนะคะ เสียใจด้วยน้า 🥺`, ephemeral: true });
-            }
-
-            // เช็คว่าเป็นผู้ชนะหรือไม่ (จากข้อความประกาศ)
-            if (!interaction.message.embeds[0].description.includes(interaction.user.id)) {
-                return interaction.reply({ content: `❌ อุ๊ย! รางวัลนี้ไม่ใช่ของตัวเองน้า ให้ผู้ชนะตัวจริงเขามากดรับนะคะ 🤭`, ephemeral: true });
-            }
-
-            const successMsg = `🎉 **ยินดีด้วยค่ะคุณ <@${interaction.user.id}>!** มารับรางวัล **"${prize}"** ไปครองได้เลยน้า\n\n🎁 **ช่องทางการรับรางวัล:**\nปายส่งข้อมูลไปให้ทาง **DM** แล้วนะคะ ตรวจสอบได้เลยค่ะ! (ถ้าเป็นลิ้งก์ สามารถจิ้มที่ข้อความใน DM ได้เลยน้า)`;
-            
-            await interaction.reply({ content: successMsg, ephemeral: true });
-            
-            // ส่ง DM
-            try {
-                const dmEmbed = new EmbedBuilder()
-                    .setColor('#FFD700')
-                    .setTitle('🎊 รางวัล GIVEAWAY มาส่งแล้วค่า! 🎊')
-                    .setDescription(`ยินดีด้วยน้าตัวเอง! นี่คือรางวัล **"${prize}"** ของคุณค่ะ\n\n📌 **รายละเอียด:** [คลิกจิ้มที่นี่เพื่อดูหรือรับรางวัล](${prize.includes('http') ? prize : 'https://discord.com'})\n\nขอบคุณที่ร่วมกิจกรรมกับเรานะคะ รักน้า~ 💖`)
-                    .setFooter({ text: 'Swift Hub Core System' });
-                await interaction.user.send({ embeds: [dmEmbed] });
-            } catch (e) {
-                console.log('ส่ง DM ไม่ได้เพราะเขาปิดไว้');
-            }
-
-            // หายไปใน 10 วิ (จำลองโดยการ delete msg ถ้าทำได้ แต่ reply ephemeral ลบไม่ได้)
+            if (Date.now() > parseInt(expiry)) return interaction.reply({ content: `❌ **หมดเวลาแล้วค่ะ!** รางวัลนี้เป็นโมฆะแล้วนะคะ 🥺`, ephemeral: true });
+            if (!interaction.message.embeds[0].description.includes(interaction.user.id)) return interaction.reply({ content: `❌ อุ๊ย! รางวัลนี้ไม่ใช่ของตัวเองน้าา 🤭`, ephemeral: true });
+            await interaction.reply({ content: `🎉 ยินดีด้วยค่ะ! ปายส่งรายละเอียดรางวัล **"${prize}"** ไปทาง DM แล้วน้าา!`, ephemeral: true });
+            try { interaction.user.send({ content: `🎊 รางวัลของคุณคือ **"${prize}"** ค่ะ! ยินดีด้วยน้าา 💖` }); } catch (e) {}
         }
 
-        // ปุ่มอื่นๆ (Verify, Ticket, Tell DM)
+        // ปุ่มรับยศ (Verify)
         if (interaction.customId.startsWith('verify_button_')) {
             const rId = interaction.customId.split('_')[2];
+            if (interaction.member.roles.cache.has(rId)) return interaction.reply({ content: '❌ **อุ๊ย! ตัวเองมียศนี้อยู่แล้วน้าา** จะกดรับซ้ำทำไมเอ่ย~ 💖✨', ephemeral: true });
             const role = interaction.guild.roles.cache.get(rId);
             if (role) {
-                await interaction.member.roles.add(role).then(() => interaction.reply({ content: '✅ **ยินยันตัวตนสำเร็จ!** ยินดีต้อนรับเข้าสู่ครอบครัวของเราอย่างเป็นทางการนะคะ 💖', ephemeral: true })).catch(() => interaction.reply({ content: '❌ ปายให้ยศไม่ได้ง่า ยศปายอยู่ต่ำกว่ายศนี้นะคะ', ephemeral: true }));
+                await interaction.member.roles.add(role).then(() => {
+                    interaction.reply({ content: '✅ **ยืนยันตัวตนสำเร็จ!** ยินดีต้อนรับเข้าสู่ครอบครัวของเราอย่างเป็นทางการนะคะ 💖', ephemeral: true });
+                }).catch(() => interaction.reply({ content: '❌ ปายให้ยศไม่ได้ง่า ยศปายอยู่ต่ำกว่ายศนี้นะคะ', ephemeral: true }));
             }
         }
 
+        // ระบบตั๋ว (Ticket)
         if (interaction.customId === 'open_ticket') {
             const cName = `ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-            if (interaction.guild.channels.cache.find(c => c.name === cName)) return interaction.reply({ content: '❌ ตัวเองมีห้องตั๋วอยู่แล้วนะคะ ทักในห้องเดิมได้เลย!', ephemeral: true });
+            if (interaction.guild.channels.cache.find(c => c.name === cName)) return interaction.reply({ content: '❌ มีห้องเดิมอยู่แล้วนะคะ!', ephemeral: true });
             const ch = await interaction.guild.channels.create({ name: cName, type: ChannelType.GuildText, permissionOverwrites: [{ id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] }, { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel] }, { id: OWNER_ID, allow: [PermissionFlagsBits.ViewChannel] }, { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel] }] });
-            const emb = new EmbedBuilder().setColor('#00FF00').setTitle(`🎫 ศูนย์แจ้งปัญหา: ${interaction.user.tag}`).setDescription(`สวัสดีค่ะ! พิมพ์แจ้งปัญหาที่พบหรือระบุชื่อคนที่ทำผิดกฎไว้ได้เลยนะคะ แอดมิน <@${OWNER_ID}> จะรีบมาตรวจสอบให้เร็วที่สุดค่ะ! 🛡️`).setTimestamp();
+            const emb = new EmbedBuilder().setColor('#00FF00').setTitle(`🎫 ศูนย์แจ้งปัญหา: ${interaction.user.tag}`).setDescription(`แอดมิน <@${OWNER_ID}> จะรีบมาตรวจสอบให้เร็วที่สุดค่ะ! 🛡️`).setTimestamp();
             const btn = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('ปิดตั๋วติดต่อ').setStyle(ButtonStyle.Danger).setEmoji('🔒'));
             await ch.send({ content: `<@${OWNER_ID}> มีสมาชิกแจ้งปัญหามาค่ะ! 🔔`, embeds: [emb], components: [btn] });
-            await interaction.reply({ content: `✅ เปิดห้องติดต่อแอดมินให้แล้วค่ะ! 👉 <#${ch.id}>`, ephemeral: true });
+            await interaction.reply({ content: `✅ เปิดห้องให้แล้วค่ะ! 👉 <#${ch.id}>`, ephemeral: true });
         }
 
         if (interaction.customId === 'close_ticket') {
-            await interaction.reply('🔒 **รับทราบค่ะ!** กำลังดำเนินการปิดห้องตั๋วภายใน 5 วินาทีนะคะ...');
+            await interaction.reply('🔒 กำลังปิดห้องภายใน 5 วินาทีค่ะ...');
             setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
         }
-
-        if (interaction.customId === 'open_tell_dm_modal') {
-            const modal = new ModalBuilder().setCustomId('tell_dm_modal').setTitle('💌 ฝากบอกข้อความทาง DM');
-            const idIn = new TextInputBuilder().setCustomId('target_id').setLabel("User ID ของคนที่จะรับข้อความ").setPlaceholder("ก๊อป ID มาวางตรงนี้เลยน้า").setStyle(TextInputStyle.Short).setRequired(true);
-            const msgIn = new TextInputBuilder().setCustomId('dm_msg').setLabel("ข้อความความในใจ").setPlaceholder("พิมพ์สิ่งที่คุณอยากบอกเขา...").setStyle(TextInputStyle.Paragraph).setRequired(true);
-            modal.addComponents(new ActionRowBuilder().addComponents(idIn), new ActionRowBuilder().addComponents(msgIn));
-            await interaction.showModal(modal);
-        }
-    }
-
-    // Modal Submit Tell DM
-    if (interaction.isModalSubmit() && interaction.customId === 'tell_dm_modal') {
-        await interaction.deferReply({ ephemeral: true });
-        try {
-            const target = await client.users.fetch(interaction.fields.getTextInputValue('target_id'));
-            const embed = new EmbedBuilder().setColor('#FF69B4').setTitle('💌 มีข้อความฝากบอกถึงคุณค่ะ!').setDescription(`สวัสดีค่ะ! มีคนฝากปายมาบอกคุณว่า:\n\n>>> **"${interaction.fields.getTextInputValue('dm_msg')}"**\n\n*ขอให้วันนี้เป็นวันที่ดีของคุณนะคะ! 💖*`).setTimestamp().setFooter({ text: 'ส่งผ่านระบบ Swift Hub Core ⚙️' });
-            await target.send({ embeds: [embed] });
-            await interaction.editReply(`✅ **ส่งสำเร็จ!** ปายแอบไปบอกเขาให้เรียบร้อยแล้วนะคะ จุ๊ๆ~ 🤫💖`);
-        } catch { await interaction.editReply('❌ **ว้า... ส่งไม่สำเร็จค่ะ**\n1. ID อาจจะผิด\n2. เขาปิดรับ DM จากคนนอกค่ะ 🥺'); }
     }
 });
 
