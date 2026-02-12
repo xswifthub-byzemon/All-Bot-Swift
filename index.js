@@ -1,454 +1,351 @@
-const { 
-    Client, 
-    GatewayIntentBits, 
-    Partials, 
-    EmbedBuilder, 
-    ActionRowBuilder, 
-    ButtonBuilder, 
-    ButtonStyle, 
-    SlashCommandBuilder, 
-    PermissionFlagsBits, 
-    REST, 
+// ===============================
+// Swift Hub Core - FIX Giveaway DM
+// By Pai 💖 For ซีม่อน
+// ===============================
+
+const {
+    Client,
+    GatewayIntentBits,
+    Partials,
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    SlashCommandBuilder,
+    PermissionFlagsBits,
+    REST,
     Routes,
     ActivityType,
     ChannelType,
-    ModalBuilder, 
-    TextInputBuilder, 
+    ModalBuilder,
+    TextInputBuilder,
     TextInputStyle,
-    StringSelectMenuBuilder,
     RoleSelectMenuBuilder,
-    ChannelSelectMenuBuilder,
-    ComponentType
+    ChannelSelectMenuBuilder
 } = require('discord.js');
-const ms = require('ms'); 
 
-// --- ⚙️ ตั้งค่าส่วนตัวของซีม่อน ---
-const TOKEN = process.env.TOKEN || 'ใส่_TOKEN_บอท_ตรงนี้'; 
-const CLIENT_ID = process.env.CLIENT_ID || 'ใส่_CLIENT_ID_บอท_ตรงนี้'; 
-const OWNER_ID = process.env.OWNER_ID || 'ใส่_ไอดี_ซีม่อน_ตรงนี้'; 
+const ms = require('ms');
 
-// เก็บข้อมูล (Memory)
+// ===== CONFIG =====
+const TOKEN = process.env.TOKEN || 'ใส่_TOKEN';
+const CLIENT_ID = process.env.CLIENT_ID || 'ใส่_CLIENT_ID';
+const OWNER_ID = process.env.OWNER_ID || 'ใส่_OWNER_ID';
+
+// ===== DATABASE (RAM) =====
 const activeGiveaways = new Map();
-const giveawaySetup = new Map(); 
+const giveawaySetup = new Map();
 const db = { users: {}, config: { antiLink: [] } };
 
-// --- 🛡️ ระบบกันบอทตาย ---
-process.on('unhandledRejection', error => console.error('Unhandled Rejection:', error));
-process.on('uncaughtException', error => console.error('Uncaught Exception:', error));
+// ===== ERROR PROTECT =====
+process.on('unhandledRejection', console.error);
+process.on('uncaughtException', console.error);
 
+// ===== CLIENT =====
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers, 
+        GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.MessageContent
     ],
-    partials: [Partials.Channel, Partials.Message, Partials.Reaction]
+    partials: [Partials.Channel]
 });
 
-// --- 📝 ลงทะเบียนคำสั่ง Slash Command ---
+// ===== SLASH =====
 const commands = [
-    new SlashCommandBuilder().setName('setup-verify').setDescription('สร้างหน้า Panel รับยศ').setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addRoleOption(o => o.setName('role').setDescription('เลือกยศที่ต้องการแจก').setRequired(true)),
-    new SlashCommandBuilder().setName('setup-ticket').setDescription('สร้างหน้า Panel ตั๋วติดต่อแอดมิน').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    new SlashCommandBuilder().setName('setup-stats').setDescription('สร้างห้องสถิติสมาชิก').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    new SlashCommandBuilder().setName('announce').setDescription('📢 ประกาศข่าวสาร').setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addStringOption(o => o.setName('title').setDescription('หัวข้อประกาศ').setRequired(true)).addStringOption(o => o.setName('message').setDescription('เนื้อหาข่าว').setRequired(true)).addAttachmentOption(o => o.setName('image').setDescription('รูปภาพประกอบ')),
-    new SlashCommandBuilder().setName('clear').setDescription('🧹 ลบข้อความ (ทันที)').setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addIntegerOption(o => o.setName('amount').setDescription('จำนวนข้อความ (1-100)').setMinValue(1).setMaxValue(100).setRequired(true)),
-    new SlashCommandBuilder().setName('setup-tell-dm').setDescription('💌 สร้างหน้า Panel ฝากบอก DM').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    new SlashCommandBuilder().setName('setup-antilink').setDescription('🛡️ ตั้งค่าห้องห้ามส่งลิงก์').setDefaultMemberPermissions(PermissionFlagsBits.Administrator).addChannelOption(o => o.setName('channel').setDescription('เลือกห้องที่ต้องการเฝ้าระวัง').addChannelTypes(ChannelType.GuildText).setRequired(true)),
-    new SlashCommandBuilder().setName('setup-level').setDescription('📊 สร้างหน้า Panel ระบบเลเวล').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addRoleOption(o => o.setName('lv20').setDescription('ยศ Lv.20').setRequired(true))
-        .addRoleOption(o => o.setName('lv40').setDescription('ยศ Lv.40').setRequired(true))
-        .addRoleOption(o => o.setName('lv60').setDescription('ยศ Lv.60').setRequired(true))
-        .addRoleOption(o => o.setName('lv80').setDescription('ยศ Lv.80').setRequired(true))
-        .addRoleOption(o => o.setName('lv100').setDescription('ยศ Lv.100').setRequired(true)),
-    
-    new SlashCommandBuilder().setName('giveaway').setDescription('🎉 เปิดหน้าจอตั้งค่ากิจกรรมแจกของ (Panel หลังบ้าน)').setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-].map(command => command.toJSON());
+    new SlashCommandBuilder()
+        .setName('giveaway')
+        .setDescription('เปิดระบบ Giveaway')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
+// ===== READY =====
 client.once('ready', async () => {
-    console.log(`✅ น้องปาย (Swift Hub Core) ออนไลน์พร้อมทำงานแล้วค่ะ!`);
-    const statusMessages = ["⚙️ Swift Hub Core | Active", "👑 Powered by Zemon Źx", "💖 น้องปายรักพี่ซีม่อนที่สุด~", "🚀 xSwift Hub Community"];
-    let currentIndex = 0;
-    setInterval(() => {
-        client.user.setPresence({ activities: [{ name: statusMessages[currentIndex], type: ActivityType.Playing }], status: 'online' });
-        currentIndex = (currentIndex + 1) % statusMessages.length;
-    }, 3000); 
-    try { await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands }); } catch (e) { console.error(e); }
+
+    console.log('✅ Swift Hub Core Ready');
+
+    try {
+        await rest.put(
+            Routes.applicationCommands(CLIENT_ID),
+            { body: commands }
+        );
+    } catch (e) {
+        console.error(e);
+    }
+
 });
 
-// ฟังก์ชันเพิ่ม XP
-function addXP(userId, amount) {
-    if (!db.users[userId]) db.users[userId] = { xp: 0, level: 1, lastMsg: 0 };
-    db.users[userId].xp += amount;
-    let nextLevelXP = db.users[userId].level * 500; 
-    if (db.users[userId].xp >= nextLevelXP && db.users[userId].level < 100) {
-        db.users[userId].level++;
-        db.users[userId].xp = 0;
-        return true; 
-    }
-    return false;
-}
+// ================================
+// INTERACTION
+// ================================
+client.on('interactionCreate', async (interaction) => {
 
-client.on('messageCreate', async message => {
-    if (message.author.bot || !message.guild) return;
-    
-    if (Date.now() - (db.users[message.author.id]?.lastMsg || 0) > 60000) {
-        const leveledUp = addXP(message.author.id, Math.floor(Math.random() * 3) + 1);
-        if (db.users[message.author.id]) db.users[message.author.id].lastMsg = Date.now();
-        if (leveledUp) message.channel.send(`🎊 สุดยอด! คุณ <@${message.author.id}> เวลอัปเป็น **Lv.${db.users[message.author.id].level}** แล้วน้าา 💖`).then(m => setTimeout(() => m.delete().catch(()=>{}), 10000));
-    }
-    
-    if (db.config.antiLink.includes(message.channelId)) {
-        const linkRegex = /(https?:\/\/[^\s]+)/g;
-        if (linkRegex.test(message.content)) {
-            await message.delete().catch(() => {});
-            const warn = await message.channel.send({ content: `❌ **ระวังค่ะคุณ <@${message.author.id}>!** ห้องนี้ห้ามส่งลิงก์นะคะ ปายลบออกให้แล้วน้า~ 🛡️✨` });
-            setTimeout(() => warn.delete().catch(() => {}), 10000); 
-        }
-    }
-});
-
-client.on('interactionCreate', async interaction => {
-    
-    // --- 1. Slash Commands ---
+    // ====================
+    // SLASH
+    // ====================
     if (interaction.isChatInputCommand()) {
-        if (interaction.user.id !== OWNER_ID) return interaction.reply({ content: '❌ สำหรับซีม่อนเท่านั้นค่ะ!', ephemeral: true });
 
-        // Clear Command
-        if (interaction.commandName === 'clear') {
-            await interaction.deferReply({ ephemeral: true }); 
-            const amt = interaction.options.getInteger('amount');
-            await interaction.channel.bulkDelete(amt, true);
-            return interaction.editReply({ content: `🧹 กวาดถูแชทเรียบร้อย **${amt}** ข้อความค่ะ! ✨`, ephemeral: true });
+        if (interaction.user.id !== OWNER_ID) {
+            return interaction.reply({ content: '❌ เฉพาะซีม่อน', ephemeral: true });
         }
 
-        // Giveaway Command (Back-end Panel)
         if (interaction.commandName === 'giveaway') {
-            const embed = new EmbedBuilder().setColor('#FF69B4').setTitle('⚙️ ตั้งค่ากิจกรรม Giveaway (หลังบ้าน)').setDescription('**กรุณาเลือกประเภทรางวัลที่ต้องการแจกค่ะ:**\n\n🛡️ **บทบาท:** แจกยศในเซิร์ฟ (บอทมอบให้เอง)\n🔗 **ลิ้งก์:** แจกซองอั่งเปา / เว็บไซต์\n📝 **ข้อความ:** แจกคีย์เกม / โค้ดลับ').setThumbnail(interaction.guild.iconURL());
+
+            const embed = new EmbedBuilder()
+                .setColor('Pink')
+                .setTitle('🎉 ตั้งค่า Giveaway')
+                .setDescription('เลือกรูปแบบรางวัล');
+
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('gw_type_role').setLabel('แจกบทบาท').setEmoji('🛡️').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId('gw_type_link').setLabel('แจกลิ้งก์').setEmoji('🔗').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId('gw_type_text').setLabel('แจกข้อความ').setEmoji('📝').setStyle(ButtonStyle.Secondary)
+                new ButtonBuilder()
+                    .setCustomId('gw_link')
+                    .setLabel('🔗 Link')
+                    .setStyle(ButtonStyle.Success),
+
+                new ButtonBuilder()
+                    .setCustomId('gw_text')
+                    .setLabel('📝 Text')
+                    .setStyle(ButtonStyle.Primary)
             );
-            return interaction.reply({ embeds: [embed], components: [row] });
-        }
 
-        // Setup Commands
-        await interaction.deferReply({ ephemeral: true });
-        try {
-            if (interaction.commandName === 'setup-level') {
-                const roles = { 20: interaction.options.getRole('lv20'), 40: interaction.options.getRole('lv40'), 60: interaction.options.getRole('lv60'), 80: interaction.options.getRole('lv80'), 100: interaction.options.getRole('lv100') };
-                const embed = new EmbedBuilder().setColor('#FFD700').setTitle('📊 ระบบเลเวล xSwift Hub 🏆').setDescription(`ยิ่งคุยเยอะ ยิ่งได้ยศและความสามารถเพิ่มขึ้น! ✨\n\n**🎁 ความสามารถเมื่อเลเวลอัป:**\n🎖️ **Lv.20:** <@&${roles[20].id}> (ปิดไมค์/เตะคนออกจากห้องเสียงได้)\n🥈 **Lv.40:** <@&${roles[40].id}> (ปิดหูฟังคนอื่นได้)\n🥇 **Lv.60:** <@&${roles[60].id}> (ลบข้อความในห้องได้)\n💎 **Lv.80:** <@&${roles[80].id}> (ยัดคนเข้าห้องเต็มได้)\n👑 **Lv.100:** <@&${roles[100].id}> (**ระดับตำนาน** สิทธิพิเศษสูงสุด!)\n\n*มาเก็บเลเวลกันเถอะ! ตันที่ 100 ค่ะ! 💖*`).setImage('https://i.pinimg.com/originals/a0/0c/3b/a00c3b3186105a305d2f627d35398246.gif').setFooter({ text: 'กดปุ่มด้านล่างเพื่อเช็คเลเวลตัวเอง 👇' });
-                const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('check_level').setLabel('📊 เช็คเลเวล').setStyle(ButtonStyle.Primary));
-                await interaction.channel.send({ embeds: [embed], components: [row] });
-                await interaction.editReply('✅ Done!');
-            }
-            if (interaction.commandName === 'setup-verify') {
-                const role = interaction.options.getRole('role');
-                const embed = new EmbedBuilder().setColor('#FF69B4').setTitle('✨ ยืนยันตัวตนเข้าสู่ครอบครัว xSwift Hub ✨').setDescription(`ยินดีต้อนรับเพื่อนๆ ทุกคนนะคะ! 🎉\nเพื่อความปลอดภัยและระเบียบเรียบร้อย กรุณายืนยันตัวตนก่อนเข้าใช้งานค่ะ\n\n**📝 ขั้นตอนง่ายๆ:**\n1️⃣ อ่านกฎของเซิร์ฟเวอร์ให้เข้าใจ\n2️⃣ กดปุ่ม **"ยืนยันตัวตน"** สีเขียวด้านล่าง\n3️⃣ ระบบจะมอบยศ <@&${role.id}> ให้ทันที!\n\n*ขอให้สนุกกับการพูดคุยและกิจกรรมดีๆ นะคะ! 💖*`).setImage('https://media.discordapp.net/attachments/1079089989930745917/1105497258381594684/standard.gif').setFooter({ text: 'ระบบยืนยันตัวตนโดย น้องปาย ⚙️' });
-                const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`verify_button_${role.id}`).setLabel('ยืนยันตัวตน').setEmoji('✅').setStyle(ButtonStyle.Success));
-                await interaction.channel.send({ embeds: [embed], components: [row] });
-                await interaction.editReply('✅ Done!');
-            }
-            if (interaction.commandName === 'setup-ticket') {
-                const embed = new EmbedBuilder().setColor('#00BFFF').setTitle('📩 ศูนย์ช่วยเหลือสมาชิก xSwift Hub 🛡️').setDescription(`**สวัสดีค่ะ! หากพบปัญหาหรือต้องการติดต่อแอดมิน เรื่อง:**\n⚠️ แจ้งคนทำผิดกฎ / เกรียน\n🛒 สั่งซื้อสินค้า / บริการ\n🔧 แจ้งปัญหาการใช้งาน\n\n*กดปุ่มด้านล่างเพื่อเปิดห้องคุยส่วนตัวได้เลยน้า 👇*`).setImage('https://cdn.discordapp.com/attachments/1443746157082706054/1448377350961106964/Strawberry_Bunny_Banner___Tickets.jpg');
-                const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('open_ticket').setLabel('เปิดตั๋วติดต่อแอดมิน').setEmoji('📩').setStyle(ButtonStyle.Primary));
-                await interaction.channel.send({ embeds: [embed], components: [row] });
-                await interaction.editReply('✅ Done!');
-            }
-            if (interaction.commandName === 'setup-tell-dm') {
-                const embed = new EmbedBuilder().setColor('#A020F0').setTitle('💌 บริการฝากบอกความในใจ (Tell DM) ✨').setDescription(`**อยากบอกอะไรกับเพื่อนแต่ไม่กล้าทักไปตรงๆ ไหมคะ?**\n💖 ให้ปายช่วยเป็นสื่อกลางสิ!\n\n*กดปุ่มด้านล่างเพื่อฝากข้อความลับไปหาเขาได้เลย!*`).setImage('https://i.pinimg.com/originals/c9/22/68/c92268d92cf2dbf96e3195683d9d3afc.gif');
-                const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('open_tell_dm_modal').setLabel('ส่งข้อความฝากบอก').setEmoji('💌').setStyle(ButtonStyle.Secondary));
-                await interaction.channel.send({ embeds: [embed], components: [row] });
-                await interaction.editReply('✅ Done!');
-            }
-            if (interaction.commandName === 'announce') {
-                const title = interaction.options.getString('title');
-                const msg = interaction.options.getString('message');
-                const img = interaction.options.getAttachment('image');
-                const embed = new EmbedBuilder().setColor('#FFD700').setTitle(`📢 ${title}`).setDescription(msg).setTimestamp().setFooter({ text: `ประกาศโดย: ${interaction.user.username}` });
-                if (img) embed.setImage(img.url);
-                await interaction.channel.send({ content: '@everyone', embeds: [embed] });
-                await interaction.editReply('✅ Done!');
-            }
-            if (interaction.commandName === 'setup-stats') {
-                await interaction.guild.members.fetch();
-                const total = interaction.guild.memberCount;
-                const cat = await interaction.guild.channels.create({ name: '📊 STATS', type: ChannelType.GuildCategory });
-                await interaction.guild.channels.create({ name: `🌎 Members: ${total}`, type: ChannelType.GuildVoice, parent: cat.id, permissionOverwrites: [{ id: interaction.guild.id, deny: [PermissionFlagsBits.Connect] }] });
-                await interaction.editReply('✅ Done!');
-            }
-            if (interaction.commandName === 'setup-antilink') {
-                const ch = interaction.options.getChannel('channel');
-                if (!db.config.antiLink.includes(ch.id)) db.config.antiLink.push(ch.id);
-                await interaction.editReply(`🛡️ ห้อง <#${ch.id}> กันลิงก์แล้ว!`);
-            }
-        } catch (e) { console.error(e); }
-    }
-
-    // --- 2. Giveaway Setup Logic ---
-    if (interaction.isButton()) {
-        if (interaction.user.id !== OWNER_ID && interaction.customId.startsWith('gw_')) {
-             return interaction.reply({ content: '❌ เฉพาะซีม่อนเท่านั้นค่ะ', ephemeral: true });
-        }
-
-        // 1. เลือกประเภทรางวัล -> เด้ง Modal ใส่รางวัล+เวลาเลย (ข้ามถามจำนวนคน = 1 เสมอ)
-        if (interaction.customId.startsWith('gw_type_')) {
-            const type = interaction.customId.replace('gw_type_', '');
-            giveawaySetup.set(interaction.user.id, { prizeType: type, winners: 1 }); // Fixed winners = 1
-
-            if (type === 'role') {
-                const row = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('gw_set_role').setPlaceholder('เลือกยศที่จะแจก...'));
-                await interaction.reply({ content: '🛡️ **กรุณาเลือกยศที่จะแจกให้ผู้ชนะค่ะ:**', components: [row], ephemeral: true });
-            } else {
-                // Link/Text: ถามรางวัล + เวลา (ใน 1 Modal)
-                const modal = new ModalBuilder().setCustomId('gw_input_prize_time').setTitle('ตั้งค่ารางวัลและเวลา');
-                
-                const prizeInput = new TextInputBuilder()
-                    .setCustomId('prize_value')
-                    .setLabel(type === 'link' ? "ลิ้งก์รางวัล" : "ข้อความรางวัล")
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setRequired(true);
-                
-                const durationInput = new TextInputBuilder()
-                    .setCustomId('duration')
-                    .setLabel("ระยะเวลา (เช่น 1m, 1h)")
-                    .setStyle(TextInputStyle.Short)
-                    .setRequired(true);
-
-                modal.addComponents(new ActionRowBuilder().addComponents(prizeInput), new ActionRowBuilder().addComponents(durationInput));
-                await interaction.showModal(modal);
-            }
-        }
-    }
-
-    // --- Handling Select Menu (Role) ---
-    if (interaction.isRoleSelectMenu() && interaction.customId === 'gw_set_role') {
-        const setup = giveawaySetup.get(interaction.user.id);
-        setup.prizes = [interaction.values[0]]; 
-        giveawaySetup.set(interaction.user.id, setup);
-        
-        // ถามเวลา (Modal เดี่ยว)
-        const modal = new ModalBuilder().setCustomId('gw_ask_duration').setTitle('ตั้งค่าเวลากิจกรรม');
-        modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duration').setLabel("ระยะเวลา (เช่น 1m, 1h)").setStyle(TextInputStyle.Short).setRequired(true)));
-        await interaction.showModal(modal);
-    }
-
-    // --- Handling Channel Select ---
-    if (interaction.isChannelSelectMenu()) {
-        const setup = giveawaySetup.get(interaction.user.id);
-        if (interaction.customId === 'gw_select_target') {
-            setup.targetCh = interaction.values[0];
-            const row = new ActionRowBuilder().addComponents(new ChannelSelectMenuBuilder().setCustomId('gw_select_log').setPlaceholder('เลือกห้องแจ้งเตือนผู้ชนะ...').addChannelTypes(ChannelType.GuildText));
-            await interaction.update({ content: '🔔 **ขั้นตอนสุดท้าย: เลือกห้องสำหรับแจ้งเตือนผู้ชนะ (Log Channel):**', components: [row] });
-        } else if (interaction.customId === 'gw_select_log') {
-            setup.logCh = interaction.values[0];
-            
-            const targetCh = interaction.guild.channels.cache.get(setup.targetCh);
-            const logCh = interaction.guild.channels.cache.get(setup.logCh);
-            let prizeText = setup.prizeType === 'role' ? `<@&${setup.prizes[0]}>` : `🎁 1 รางวัล (ลุ้นรางวัลใน DM)`;
-            
-            const embed = new EmbedBuilder().setColor('#FFD700').setTitle('🎊 กิจกรรม GIVEAWAY ✨').setDescription(`🎁 **รางวัล:** **${prizeText}**\n👥 **จำนวนผู้โชคดี:** **1 ท่าน**\n⏳ **เวลา:** **${setup.duration}**\n\n⬇️ **รายชื่อผู้เข้าร่วม (Real-time):**\n(รอคนกดปุ่ม...)`).setFooter({ text: 'กดปุ่มด้านล่างเพื่อเข้าร่วม! (เวลาจะเริ่มนับเมื่อมีคนแรกกด)' });
-            const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('join_giveaway').setLabel('เข้าร่วมกิจกรรม').setEmoji('🎉').setStyle(ButtonStyle.Success));
-            
-            const gmsg = await targetCh.send({ embeds: [embed], components: [row] });
-            await interaction.update({ content: `✅ **กิจกรรมเริ่มแล้ว!**\n📍 ห้องกิจกรรม: <#${targetCh.id}>\n🔔 ห้องแจ้งเตือน: <#${logCh.id}>`, components: [] });
-
-            activeGiveaways.set(gmsg.id, {
-                messageId: gmsg.id,
-                channelId: targetCh.id,
-                logChannelId: logCh.id,
-                prizes: setup.prizes,
-                prizeType: setup.prizeType,
-                winnersCount: 1, 
-                duration: ms(setup.duration),
-                startTime: null,
-                participants: []
+            return interaction.reply({
+                embeds: [embed],
+                components: [row]
             });
         }
     }
 
-    // --- 3. Modals Submit (Fix Logic) ---
-    if (interaction.isModalSubmit()) {
-        
-        // รับค่ารางวัล + เวลา (Link/Text) -> ไปเลือกห้อง
-        if (interaction.customId === 'gw_input_prize_time') {
-            const setup = giveawaySetup.get(interaction.user.id);
-            setup.prizes = [interaction.fields.getTextInputValue('prize_value')];
-            setup.duration = interaction.fields.getTextInputValue('duration');
-            giveawaySetup.set(interaction.user.id, setup);
+    // ====================
+    // SET TYPE
+    // ====================
+    if (interaction.isButton()) {
 
-            const row = new ActionRowBuilder().addComponents(new ChannelSelectMenuBuilder().setCustomId('gw_select_target').setPlaceholder('เลือกห้องที่จะโพสต์กิจกรรม...').addChannelTypes(ChannelType.GuildText));
-            await interaction.reply({ content: '📢 **เลือกห้องที่จะให้ปายโพสต์กิจกรรม (Target Channel):**', components: [row], ephemeral: true });
-        }
+        if (interaction.customId.startsWith('gw_')) {
 
-        // รับค่าเวลา (กรณี Role) -> ไปเลือกห้อง
-        else if (interaction.customId === 'gw_ask_duration') {
-            const setup = giveawaySetup.get(interaction.user.id);
-            setup.duration = interaction.fields.getTextInputValue('duration');
-            giveawaySetup.set(interaction.user.id, setup);
+            const type = interaction.customId.replace('gw_', '');
 
-            const row = new ActionRowBuilder().addComponents(new ChannelSelectMenuBuilder().setCustomId('gw_select_target').setPlaceholder('เลือกห้องที่จะโพสต์กิจกรรม...').addChannelTypes(ChannelType.GuildText));
-            await interaction.reply({ content: '📢 **เลือกห้องที่จะให้ปายโพสต์กิจกรรม (Target Channel):**', components: [row], ephemeral: true });
-        }
+            giveawaySetup.set(interaction.user.id, {
+                prizeType: type
+            });
 
-        // Tell DM
-        else if (interaction.customId === 'tell_dm_modal') {
-            await interaction.deferReply({ ephemeral: true });
-            try {
-                const target = await client.users.fetch(interaction.fields.getTextInputValue('target_id'));
-                const embed = new EmbedBuilder().setColor('#FF69B4').setTitle('💌 มีข้อความฝากบอกถึงคุณค่ะ!').setDescription(`>>> **"${interaction.fields.getTextInputValue('dm_msg')}"**\n\n*จากผู้ไม่ประสงค์ออกนาม (ส่งผ่านระบบ Tell DM)*`);
-                await target.send({ embeds: [embed] });
-                await interaction.editReply(`✅ **ส่งสำเร็จ!**`);
-            } catch { await interaction.editReply('❌ **ส่งไม่สำเร็จค่ะ** (ID ผิด หรือเขาปิดรับ DM)'); }
+            const modal = new ModalBuilder()
+                .setCustomId('gw_modal')
+                .setTitle('ตั้งค่า Giveaway');
+
+            const prize = new TextInputBuilder()
+                .setCustomId('prize')
+                .setLabel('รางวัล')
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(true);
+
+            const time = new TextInputBuilder()
+                .setCustomId('time')
+                .setLabel('เวลา (1m / 1h)')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true);
+
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(prize),
+                new ActionRowBuilder().addComponents(time)
+            );
+
+            return interaction.showModal(modal);
         }
     }
 
-    // --- 4. General Buttons ---
+    // ====================
+    // MODAL
+    // ====================
+    if (interaction.isModalSubmit()) {
+
+        if (interaction.customId === 'gw_modal') {
+
+            const setup = giveawaySetup.get(interaction.user.id);
+
+            setup.prize = interaction.fields.getTextInputValue('prize');
+            setup.time = interaction.fields.getTextInputValue('time');
+
+            giveawaySetup.set(interaction.user.id, setup);
+
+            const row = new ActionRowBuilder().addComponents(
+                new ChannelSelectMenuBuilder()
+                    .setCustomId('gw_channel')
+                    .setPlaceholder('เลือกห้อง')
+                    .addChannelTypes(ChannelType.GuildText)
+            );
+
+            return interaction.reply({
+                content: 'เลือกห้องลงกิจกรรม',
+                components: [row],
+                ephemeral: true
+            });
+        }
+    }
+
+    // ====================
+    // SELECT CHANNEL
+    // ====================
+    if (interaction.isChannelSelectMenu()) {
+
+        if (interaction.customId === 'gw_channel') {
+
+            const setup = giveawaySetup.get(interaction.user.id);
+
+            const ch = interaction.guild.channels.cache.get(
+                interaction.values[0]
+            );
+
+            const embed = new EmbedBuilder()
+                .setColor('Gold')
+                .setTitle('🎉 GIVEAWAY')
+                .setDescription(`🎁 รางวัล: ||DM||\nกดเข้าร่วมเลย`);
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId('join_gw')
+                    .setLabel('🎉 Join')
+                    .setStyle(ButtonStyle.Success)
+            );
+
+            const msg = await ch.send({
+                embeds: [embed],
+                components: [row]
+            });
+
+            activeGiveaways.set(msg.id, {
+                id: msg.id,
+                channel: ch.id,
+                prize: setup.prize,
+                type: setup.prizeType,
+                duration: ms(setup.time),
+                users: []
+            });
+
+            return interaction.update({
+                content: '✅ เปิดกิจกรรมแล้ว',
+                components: []
+            });
+        }
+    }
+
+    // ====================
+    // JOIN
+    // ====================
     if (interaction.isButton()) {
-        // JOIN GIVEAWAY
-        if (interaction.customId === 'join_giveaway') {
+
+        if (interaction.customId === 'join_gw') {
+
             const gw = activeGiveaways.get(interaction.message.id);
-            if (!gw) return interaction.reply({ content: '❌ กิจกรรมนี้จบไปแล้วหรือระบบรีเซ็ตแล้วค่ะ', ephemeral: true });
 
-            if (gw.participants.includes(interaction.user.id)) return interaction.reply({ content: '⚠️ ตัวเองลงชื่อไปแล้วน้า!', ephemeral: true });
+            if (!gw) return;
 
-            if (gw.participants.length === 0) {
-                gw.startTime = Date.now();
+            if (gw.users.includes(interaction.user.id)) {
+                return interaction.reply({
+                    content: '⚠️ ลงแล้ว',
+                    ephemeral: true
+                });
+            }
+
+            if (gw.users.length === 0) {
                 setTimeout(() => endGiveaway(gw), gw.duration);
             }
 
-            gw.participants.push(interaction.user.id);
-            activeGiveaways.set(interaction.message.id, gw); 
+            gw.users.push(interaction.user.id);
 
-            const listStr = gw.participants.map((id, index) => `${index + 1}. <@${id}>`).join('\n');
-            const embed = EmbedBuilder.from(interaction.message.embeds[0]);
-            let timeText = gw.startTime ? `สิ้นสุด: <t:${Math.floor((gw.startTime + gw.duration)/1000)}:R>` : `เวลา: ${ms(gw.duration, {long:true})} (เริ่มนับเมื่อมีคนกด)`;
-            
-            let prizeDisplay = gw.prizeType === 'role' ? `<@&${gw.prizes[0]}>` : '🎁 1 รางวัล (ลุ้นรางวัลใน DM)';
-
-            embed.setDescription(`🎁 **รางวัล:** **${prizeDisplay}**\n👥 **ผู้โชคดี:** **1 ท่าน**\n⏳ **${timeText}**\n\n⬇️ **รายชื่อผู้เข้าร่วม (${gw.participants.length}):**\n${listStr.substring(0, 1000)}`);
-            await interaction.update({ embeds: [embed] });
-        }
-
-        // CLAIM PRIZE (Fix: DM Sending)
-        if (interaction.customId.startsWith('claim_')) {
-            const gwId = interaction.customId.split('_')[1];
-            const gw = activeGiveaways.get(gwId);
-            
-            if (!gw || !gw.winnersList) return interaction.reply({ content: '❌ ข้อมูลกิจกรรมหมดอายุ (บอทรีสตาร์ท) กรุณาติดต่อแอดมินรับมือค่ะ', ephemeral: true });
-            
-            if (!gw.winnersList.includes(interaction.user.id)) return interaction.reply({ content: '❌ ตัวเองไม่ใช่ผู้ชนะน้าา', ephemeral: true });
-            
-            const prize = gw.prizes[0];
-            
-            // ใช้ deferReply เพื่อให้บอทมีเวลาส่ง DM
-            await interaction.deferReply({ ephemeral: true });
-            
-            try {
-                const dmEmbed = new EmbedBuilder().setColor('Gold').setTitle('🎁 ของรางวัลมาแล้ว!').setFooter({text: 'xSwift Hub Giveaway'});
-                const components = [];
-                
-                if (gw.prizeType === 'role') {
-                    dmEmbed.setDescription(`ยินดีด้วย! คุณได้รับยศ <@&${prize}> \nระบบได้มอบยศให้คุณเรียบร้อยแล้วค่ะ! ✅`);
-                    const role = interaction.guild.roles.cache.get(prize);
-                    if (role) await interaction.member.roles.add(role).catch(err => console.log(err));
-                } else if (gw.prizeType === 'link') {
-                    dmEmbed.setDescription(`ยินดีด้วย! นี่คือลิ้งก์รางวัลของคุณค่ะ 👇`);
-                    const btn = new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel('🔗 กดเพื่อรับรางวัล').setStyle(ButtonStyle.Link).setURL(prize));
-                    components.push(btn);
-                } else { // text
-                    dmEmbed.setDescription(`ยินดีด้วย! นี่คือโค้ดรางวัลของคุณค่ะ 👇\n\`\`\`${prize}\`\`\`\n(กดค้างเพื่อคัดลอก)`);
-                }
-                
-                // ส่ง DM
-                await interaction.user.send({ embeds: [dmEmbed], components });
-                // แจ้งเตือนหน้าแชทเมื่อส่งสำเร็จ
-                await interaction.editReply({ content: '✅ **ส่งเรียบร้อย! เช็ค DM ได้เลยค่ะ** 📨' });
-            } catch (e) {
-                console.error(e);
-                // แจ้งเตือนเมื่อส่งไม่สำเร็จ
-                await interaction.editReply({ content: '❌ **ส่ง DM ไม่ได้** (ตัวเองปิด DM หรือเปล่า?) รบกวนเปิดแล้วกดใหม่นะคะ' });
-            }
-        }
-
-        // Verify Check
-        if (interaction.customId.startsWith('verify_button_')) {
-            const rId = interaction.customId.split('_')[2];
-            if (interaction.member.roles.cache.has(rId)) {
-                return interaction.reply({ content: `⚠️ **ได้รับยศ <@&${rId}> ไปแล้วน้า! อย่ากดเล่นสิคะ 😜**`, ephemeral: true });
-            }
-            const role = interaction.guild.roles.cache.get(rId);
-            if (role) {
-                await interaction.member.roles.add(role)
-                    .then(() => interaction.reply({ content: '✅ **ยืนยันตัวตนสำเร็จ!** ยินดีต้อนรับนะคะ 💖', ephemeral: true }))
-                    .catch(err => interaction.reply({ content: '❌ บอทให้ยศไม่ได้ (ยศบอทต้องอยู่สูงกว่ายศนี้)', ephemeral: true }));
-            } else {
-                interaction.reply({ content: '❌ ไม่พบยศนี้ในเซิร์ฟเวอร์', ephemeral: true });
-            }
-        }
-
-        // Ticket & Level
-        if (interaction.customId === 'open_ticket') {
-            const cName = `ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-            if (interaction.guild.channels.cache.find(c => c.name === cName)) return interaction.reply({ content: '❌ มีห้องเดิมอยู่แล้วนะคะ', ephemeral: true });
-            const ch = await interaction.guild.channels.create({ name: cName, type: ChannelType.GuildText, permissionOverwrites: [{ id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] }, { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel] }, { id: OWNER_ID, allow: [PermissionFlagsBits.ViewChannel] }, { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel] }] });
-            const btn = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('ปิดตั๋ว').setStyle(ButtonStyle.Danger).setEmoji('🔒'));
-            await ch.send({ content: `<@${OWNER_ID}>`, embeds: [new EmbedBuilder().setTitle('🎫 มีสมาชิกเปิดตั๋วใหม่ค่ะ').setColor('Green')], components: [btn] });
-            await interaction.reply({ content: `✅ เปิดห้องให้แล้วค่ะ! 👉 <#${ch.id}>`, ephemeral: true });
-        }
-        if (interaction.customId === 'close_ticket') {
-            await interaction.reply('🔒 กำลังปิดห้องภายใน 5 วินาที...');
-            setTimeout(() => interaction.channel.delete().catch(()=>{}), 5000);
-        }
-        if (interaction.customId === 'check_level') {
-            const d = db.users[interaction.user.id] || { xp: 0, level: 1 };
-            interaction.reply({ content: `📊 **Lv.${d.level}** | XP: ${d.xp}`, ephemeral: true });
-        }
-        if (interaction.customId === 'open_tell_dm_modal') {
-            const modal = new ModalBuilder().setCustomId('tell_dm_modal').setTitle('💌 ฝากบอกข้อความ');
-            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('target_id').setLabel("User ID").setStyle(TextInputStyle.Short).setRequired(true)), new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dm_msg').setLabel("ข้อความ").setStyle(TextInputStyle.Paragraph).setRequired(true)));
-            await interaction.showModal(modal);
+            return interaction.reply({
+                content: '✅ เข้าร่วมแล้ว',
+                ephemeral: true
+            });
         }
     }
+
+    // ====================
+    // CLAIM (FIXED)
+    // ====================
+    if (interaction.isButton()) {
+
+        if (interaction.customId.startsWith('claim_')) {
+
+            const id = interaction.customId.replace('claim_', '');
+            const gw = activeGiveaways.get(id);
+
+            if (!gw || !gw.winner) {
+                return interaction.reply({
+                    content: '❌ ข้อมูลหาย',
+                    ephemeral: true
+                });
+            }
+
+            if (gw.winner !== interaction.user.id) {
+                return interaction.reply({
+                    content: '❌ ไม่ใช่ผู้ชนะ',
+                    ephemeral: true
+                });
+            }
+
+            await interaction.deferReply({ ephemeral: true });
+
+            try {
+
+                const embed = new EmbedBuilder()
+                    .setColor('Gold')
+                    .setTitle('🎁 ของรางวัล')
+                    .setDescription(`\`\`\`${gw.prize}\`\`\``);
+
+                await interaction.user.send({
+                    embeds: [embed]
+                });
+
+                await interaction.editReply('✅ ส่ง DM แล้ว');
+
+            } catch {
+
+                await interaction.editReply('❌ เปิด DM ก่อน');
+            }
+        }
+    }
+
 });
 
-// ฟังก์ชันจบ Giveaway
+// ================================
+// END GIVEAWAY
+// ================================
 async function endGiveaway(gw) {
-    try {
-        const channel = client.channels.cache.get(gw.channelId);
-        const logChannel = client.channels.cache.get(gw.logChannelId);
-        if (!channel) return;
 
-        const msg = await channel.messages.fetch(gw.messageId).catch(()=>null);
-        if (!msg) return;
+    const ch = client.channels.cache.get(gw.channel);
+    if (!ch) return;
 
-        if (gw.participants.length === 0) {
-            msg.edit({ content: '❌ **จบกิจกรรมแล้ว (ไม่มีผู้เข้าร่วม)**', embeds: [], components: [] });
-            return;
-        }
+    if (gw.users.length === 0) return;
 
-        const shuffled = gw.participants.sort(() => 0.5 - Math.random());
-        const winners = shuffled.slice(0, gw.winnersCount);
-        gw.winnersList = winners; 
-        activeGiveaways.set(gw.messageId, gw); 
+    const winner =
+        gw.users[Math.floor(Math.random() * gw.users.length)];
 
-        const resultEmbed = new EmbedBuilder().setColor('#FFD700').setTitle('🎊 ประกาศรายชื่อผู้โชคดี! 🎊')
-            .setDescription(`🏆 **ผู้ชนะ:** ${winners.map((id, i) => `${i+1}. <@${id}>`).join('\n')}\n\n⚠️ **เงื่อนไข:** กรุณากดปุ่ม **"🎁 รับรางวัลที่นี่"** ภายใน 10 ชม.\n*(หากเป็นยศระบบจะมอบให้ทันที หากเป็นของรางวัลอื่นจะส่งทาง DM ค่ะ)*`);
-        
-        const claimRow = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`claim_${gw.messageId}_btn`).setLabel('🎁 รับรางวัลที่นี่').setStyle(ButtonStyle.Success));
-        
-        await msg.edit({ content: `🎉 **ยินดีด้วยค่ะ!**`, embeds: [resultEmbed], components: [claimRow] });
+    gw.winner = winner;
 
-        if (logChannel) {
-            const logEmbed = new EmbedBuilder().setColor('#00FF00').setTitle('📢 ประกาศผล Giveaway').setDescription(`🎉 ยินดีด้วยกับ: ${winners.map(id => `<@${id}>`).join(', ')}\n🎁 **รางวัล:** ||🔒 ตรวจสอบรางวัลจริงใน DM เท่านั้น||`).setTimestamp();
-            logChannel.send({ content: winners.map(id => `<@${id}>`).join(' '), embeds: [logEmbed] });
-        }
+    activeGiveaways.set(gw.id, gw);
 
-    } catch (e) { console.error(e); }
+    const embed = new EmbedBuilder()
+        .setColor('Green')
+        .setTitle('🏆 ผู้ชนะ')
+        .setDescription(`<@${winner}>`);
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`claim_${gw.id}`) // FIXED
+            .setLabel('🎁 รับรางวัล')
+            .setStyle(ButtonStyle.Success)
+    );
+
+    const msg = await ch.messages.fetch(gw.id);
+
+    await msg.edit({
+        embeds: [embed],
+        components: [row]
+    });
+
 }
 
+// ================================
 client.login(TOKEN);
