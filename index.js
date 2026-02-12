@@ -23,10 +23,9 @@ const TOKEN = process.env.TOKEN || 'ใส่_TOKEN_บอท_ตรงนี้
 const CLIENT_ID = process.env.CLIENT_ID || 'ใส่_CLIENT_ID_บอท_ตรงนี้'; 
 const OWNER_ID = process.env.OWNER_ID || 'ใส่_ไอดี_ซีม่อน_ตรงนี้'; 
 
-// หน่วยความจำชั่วคราว (จะรีเซ็ตเมื่อบอทดับ/รีสตาร์ท)
 let antiLinkChannels = []; 
 
-// --- 🛡️ ระบบกันบอทตาย (Anti-Crash) ---
+// --- 🛡️ ระบบกันบอทตาย ---
 process.on('unhandledRejection', error => console.error('Unhandled Rejection:', error));
 process.on('uncaughtException', error => console.error('Uncaught Exception:', error));
 
@@ -59,7 +58,6 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 client.once('ready', async () => {
     console.log(`✅ น้องปาย (Swift Hub Core) รายงานตัวแล้วค่ะ!`);
     
-    // Status วนลูป
     const statusMessages = [
         "⚙️ Swift Hub Core | Active", "👑 Powered by Zemon Źx", "💖 น้องปายรักพี่ซีม่อนที่สุด~", 
         "🚀 ระบบยืนยันตัวตน & ตั๋ว 24/7", "🛡️ Swift Hub Security", "✨ ยินดีต้อนรับสู่ xSwift Hub",
@@ -71,7 +69,6 @@ client.once('ready', async () => {
         currentIndex = (currentIndex + 1) % statusMessages.length;
     }, 3000); 
 
-    // อัปเดต Stats ทุก 10 นาที
     setInterval(async () => {
         client.guilds.cache.forEach(async guild => {
             try {
@@ -106,11 +103,9 @@ client.on('messageCreate', async message => {
 // --- 👂 Interaction Handler ---
 client.on('interactionCreate', async interaction => {
     
-    // 1. Slash Commands
     if (interaction.isChatInputCommand()) {
         if (interaction.user.id !== OWNER_ID) return interaction.reply({ content: '❌ สำหรับซีม่อนเท่านั้นค่ะ!', ephemeral: true });
 
-        // Defer Reply เพื่อกัน Timeout
         if (interaction.commandName !== 'giveaway') await interaction.deferReply({ ephemeral: true });
 
         try {
@@ -194,7 +189,6 @@ client.on('interactionCreate', async interaction => {
         } catch (e) { console.error(e); }
     }
 
-    // 2. Buttons & Modals
     if (interaction.isButton()) {
         if (interaction.customId.startsWith('verify_button_')) {
             await interaction.deferReply({ ephemeral: true });
